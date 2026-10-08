@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui, sans-serif;
+  --color-paper: #e8eae3;
+  --color-paper-2: #dde1d6;
+  --color-ink: #141614;
+  --color-muted: #6a6e66;
+  --color-line: #c4c8be;
+  --color-provider: #2f7a3c;
+  --color-buyer: #3b6fd8;
+}
+
+html {
+  scroll-behavior: auto;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.paper-grain {
+  background-image:
+    linear-gradient(rgba(20, 22, 20, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 22, 20, 0.035) 1px, transparent 1px);
+  background-size: 72px 72px;
+}
+
+.network-flow {
+  stroke-dasharray: 6 10;
+  animation: dash-flow 18s linear infinite;
+}
+
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -240;
+  }
+}
+
+@keyframes node-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.35);
+  }
+}
+
+.node-halo {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: node-breathe 4.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .network-flow,
+  .node-halo {
+    animation: none;
+  }
+}
+
+::selection {
+  background: #cfe3d2;
+  color: var(--color-ink);
+}
