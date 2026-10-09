@@ -134,7 +134,7 @@ function HeroCopy({ progress, side, setSide, onListStream }) {
 
 function CompactSwitcher({ side, setSide, onListStream }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-ink/10 px-5 py-3 sm:px-8 lg:px-10">
+    <div className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-4 border-b border-ink/10 bg-paper px-5 py-3 sm:px-8 lg:px-10">
       <div className="flex items-baseline gap-6">
         <button
           type="button"
@@ -486,10 +486,6 @@ function Marketplace({
                 </p>
               </div>
               <div className="flex min-w-[7.5rem] flex-col items-end justify-between">
-                <p className="text-right text-[12px] text-muted">
-                  Save ${item.save.toLocaleString()}
-                  <span className="block text-[10px] uppercase tracking-[0.12em]">est.</span>
-                </p>
                 <button
                   type="button"
                   onClick={(e) => {
