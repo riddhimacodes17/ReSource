@@ -104,7 +104,8 @@ function HeroCopy({ progress, side, setSide, onListStream }) {
       <button
         type="button"
         onClick={() => setSide('need')}
-        className={`mt-3 flex w-full items-center gap-3 text-left ${side === 'need' ? 'text-ink' : 'text-ink/50'}`}
+        className={`mt-3 flex w-full items-center gap-3 text-left transition-opacity duration-300 ${side === 'need' ? 'text-ink' : 'text-ink/50'}`}
+        style={{ opacity: side === 'need' ? 1 : 0.4 }}
       >
         <span className="mt-2 h-3 w-3 shrink-0 rounded-full border-[2.5px] border-buyer" />
         <span className="text-[clamp(52px,8.4vw,92px)] font-semibold leading-[0.92] tracking-[-0.045em] text-buyer">
@@ -240,7 +241,7 @@ function MapNode({ node, selected, onSelect, zoom }) {
     </g>
   )
 }
-
+//map fxn below(to be replaced)
 function IndustrialMap({ selectedId, onSelect, extraNodes }) {
   const [zoom, setZoom] = useState(1)
   const nodes = [...INITIAL_NODES, ...extraNodes]
@@ -345,6 +346,7 @@ function IndustrialMap({ selectedId, onSelect, extraNodes }) {
     </div>
   )
 }
+// map ends
 
 function Marketplace({
   mode,
@@ -620,9 +622,6 @@ export default function App() {
     setMode(next === 'have' ? 'sell' : 'buy')
   }
 
-  const exchangeOpacity = clamp((progress - 0.22) / 0.55, 0, 1)
-  const heroNetOpacity = 1 - exchangeOpacity
-
   function handleAccept(item) {
     if (accepted[item.id]) return
     setAccepted((prev) => ({ ...prev, [item.id]: true }))
@@ -671,63 +670,45 @@ export default function App() {
   }
 
   return (
-    <div className="paper-grain min-h-[220vh] bg-paper text-ink">
-      <div className="sticky top-0 flex h-screen flex-col overflow-hidden">
+    <div className="paper-grain bg-paper text-ink">
+      <section className="relative z-10 flex min-h-screen flex-col overflow-hidden">
         <Header streams={stats.streams} saved={stats.saved} co2={stats.co2} />
 
-        <div className="relative min-h-0 flex-1">
-          <div
-            className="pointer-events-none absolute inset-0"
-            style={{ opacity: heroNetOpacity }}
-          >
+        <div className="relative flex-1">
+          <div className="pointer-events-none absolute inset-0">
             <HeroNetwork />
           </div>
 
-          <div
-            className="relative z-20"
-            style={{
-              opacity: 1 - exchangeOpacity,
-              pointerEvents: exchangeOpacity > 0.7 ? 'none' : 'auto',
-            }}
-          >
-            <HeroCopy
-              progress={progress}
-              side={side}
-              setSide={chooseSide}
-              onListStream={() => setFormOpen(true)}
-            />
-          </div>
+          <HeroCopy
+            progress={progress}
+            side={side}
+            setSide={chooseSide}
+            onListStream={() => setFormOpen(true)}
+          />
+        </div>
+      </section>
 
-          <div
-            className="absolute inset-0 z-10 flex min-h-0 flex-col"
-            style={{
-              opacity: exchangeOpacity,
-              transform: `translate3d(0, ${(1 - exchangeOpacity) * 24}px, 0)`,
-              pointerEvents: exchangeOpacity > 0.35 ? 'auto' : 'none',
-            }}
-          >
-            <CompactSwitcher
-              side={side}
-              setSide={chooseSide}
-              onListStream={() => setFormOpen(true)}
-            />
-            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] lg:overflow-hidden">
-              <IndustrialMap
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                extraNodes={extraNodes}
-              />
-              <Marketplace
-                mode={mode}
-                setMode={setMode}
-                listings={listings}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                accepted={accepted}
-                onAccept={handleAccept}
-              />
-            </div>
-          </div>
+      <section className="relative z-10 flex min-h-screen flex-col">
+        <CompactSwitcher
+          side={side}
+          setSide={chooseSide}
+          onListStream={() => setFormOpen(true)}
+        />
+        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+          <IndustrialMap
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            extraNodes={extraNodes}
+          />
+          <Marketplace
+            mode={mode}
+            setMode={setMode}
+            listings={listings}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            accepted={accepted}
+            onAccept={handleAccept}
+          />
         </div>
 
         <footer className="relative z-20 flex items-end justify-between gap-4 px-5 py-4 text-[10px] uppercase tracking-[0.14em] text-muted sm:px-8">
@@ -738,7 +719,7 @@ export default function App() {
           </p>
           <p className="ml-auto">The Amazon Marketplace for industrial waste.</p>
         </footer>
-      </div>
+      </section>
 
       {formOpen && (
         <StreamForm side={side} onClose={() => setFormOpen(false)} onCreate={handleCreate} />
