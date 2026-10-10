@@ -499,13 +499,286 @@ function Marketplace({
                       : 'border-ink/70 hover:bg-ink hover:text-paper'
                   }`}
                 >
-                  {isAccepted ? 'Matched' : 'Accept match'}
+                  {isAccepted ? 'Matched' : 'Make An Offer'}
                 </button>
               </div>
             </article>
           )
         })}
       </div>
+    </div>
+  )
+}
+
+function TradeSide({ title, company, tone, offers, setOffers }) {
+  function addOffer() {
+    if (offers.length >= 4) return
+    setOffers((current) => [
+      ...current,
+      { kind: 'resource', label: '', amount: '', unit: '', editing: true },
+    ])
+  }
+
+  function updateOffer(index, changes) {
+    setOffers((current) =>
+      current.map((offer, offerIndex) =>
+        offerIndex === index ? { ...offer, ...changes } : offer,
+      ),
+    )
+  }
+
+  function removeOffer(index) {
+    setOffers((current) => current.filter((_, offerIndex) => offerIndex !== index))
+  }
+
+  return (
+    <section className="min-w-0">
+      <h3 className="flex items-center gap-2 border-b-2 border-ink pb-2 text-base font-semibold">
+        <span
+          className={`h-2 w-2 shrink-0 rounded-full ${tone === 'buyer' ? 'border-2 border-buyer' : 'bg-provider'}`}
+        />
+        <span className="truncate">{title} · [{company}]</span>
+      </h3>
+      <div className="mt-3 grid grid-cols-2 gap-2.5">
+        {[0, 1, 2, 3].map((slot) => {
+          const offer = offers[slot]
+          return offer ? (
+            <div key={slot} className="relative flex min-h-32 flex-col border border-ink/40 p-2 sm:min-h-36 sm:p-3">
+              <span className="font-mono text-[9px] text-muted">0{slot + 1}</span>
+              <span className="mt-2 text-[9px] uppercase tracking-[0.08em] text-muted">
+                {offer.kind === 'cash' ? 'Cash' : 'Resource'}
+              </span>
+              <strong className="mt-1 break-words text-[13px] leading-tight">
+                {offer.label || (offer.kind === 'cash' ? 'Price' : 'Resource name')}
+              </strong>
+              <span className="mt-1 text-[10px] text-muted">
+                {offer.amount || (offer.kind === 'cash' ? 'Enter amount' : 'Enter quantity')}
+                {offer.unit ? ` · ${offer.unit}` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={() => removeOffer(slot)}
+                className="mt-auto self-end pt-2 text-[9px] uppercase tracking-[0.08em] text-muted hover:text-ink"
+                aria-label={`Remove ${offer.label || offer.kind} from ${title}`}
+              >
+                × Remove
+              </button>
+              {offer.editing && (
+                <div className="absolute inset-0 z-10 flex flex-col gap-1.5 border border-ink bg-paper p-2 shadow-lg">
+                  <select
+                    value={offer.kind}
+                    onChange={(event) => updateOffer(slot, {
+                      kind: event.target.value,
+                      label: '',
+                      amount: '',
+                      unit: '',
+                    })}
+                    className="w-full border-b border-ink/20 bg-transparent py-1 text-[10px] outline-none"
+                    aria-label="Offer type"
+                  >
+                    <option value="resource">Resource</option>
+                    <option value="cash">Cash</option>
+                  </select>
+                  <input
+                    autoFocus
+                    value={offer.label}
+                    onChange={(event) => updateOffer(slot, { label: event.target.value })}
+                    placeholder={offer.kind === 'cash' ? 'Price' : 'Resource name'}
+                    className="w-full border-b border-ink/20 bg-transparent py-1 text-[10px] outline-none"
+                    aria-label="Offer name"
+                  />
+                  <input
+                    value={offer.amount}
+                    onChange={(event) => updateOffer(slot, { amount: event.target.value })}
+                    placeholder={offer.kind === 'cash' ? 'Amount (INR)' : 'Quantity'}
+                    className="w-full border-b border-ink/20 bg-transparent py-1 text-[10px] outline-none"
+                    aria-label="Offer amount"
+                  />
+                  <input
+                    value={offer.unit}
+                    onChange={(event) => updateOffer(slot, { unit: event.target.value })}
+                    placeholder={offer.kind === 'cash' ? 'e.g. per kg' : 'e.g. kg / day'}
+                    className="w-full border-b border-ink/20 bg-transparent py-1 text-[10px] outline-none"
+                    aria-label="Offer unit"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => updateOffer(slot, { editing: false })}
+                    className="mt-auto self-end text-[9px] uppercase tracking-[0.08em] underline"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+              {!offer.editing && (
+                <button
+                  type="button"
+                  onClick={() => updateOffer(slot, { editing: true })}
+                  className="absolute right-2 top-2 text-[9px] uppercase tracking-[0.08em] text-muted underline hover:text-ink"
+                  aria-label={`Edit ${offer.label || offer.kind} offer`}
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+          ) : (
+            <button
+              key={slot}
+              type="button"
+              onClick={addOffer}
+              disabled={offers.length >= 4}
+              className="flex min-h-32 items-center justify-center border border-dashed border-ink/25 text-2xl text-muted transition hover:border-ink/60 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-36"
+              aria-label={`Add offer to ${title}`}
+            >
+              +
+            </button>
+          )
+        })}
+      </div>
+      <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.06em] text-muted">
+        {title === 'You' ? 'You give' : 'They give'} · value [—]
+      </p>
+    </section>
+  )
+}
+
+function TradeModal({ item, onClose, onComplete }) {
+  const userStartsWithCash = item.mode === 'buy'
+  const [yourOffers, setYourOffers] = useState([
+    userStartsWithCash
+      ? { kind: 'cash', label: 'Price', amount: '', unit: 'INR per kg' }
+      : { kind: 'resource', label: item.title, amount: item.qty, unit: '' },
+  ])
+  const [theirOffers, setTheirOffers] = useState([
+    userStartsWithCash
+      ? { kind: 'resource', label: item.title, amount: item.qty, unit: '' }
+      : { kind: 'cash', label: 'Price', amount: '', unit: 'INR per kg' },
+  ])
+  const [acceptedBy, setAcceptedBy] = useState({ you: false, them: false })
+  const [isComplete, setIsComplete] = useState(false)
+
+  function accept(side) {
+    if (isComplete) return
+    const next = { ...acceptedBy, [side]: true }
+    setAcceptedBy(next)
+    if (next.you && next.them) {
+      setIsComplete(true)
+      onComplete()
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-ink/40 p-3 sm:p-6"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="trade-title"
+        className="relative max-h-[94vh] w-full max-w-5xl overflow-y-auto border border-ink/50 bg-paper p-4 shadow-[0_20px_80px_rgba(20,22,20,0.2)] sm:p-6 lg:p-10"
+      >
+        <div className="flex items-center justify-between gap-4 font-mono text-[9px] uppercase tracking-[0.08em] sm:text-[10px]">
+          <p>Trade · Match [{Math.round(item.reliability * 19.2)}%] · [{item.distance} km]</p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 text-muted hover:text-ink"
+            aria-label="Close trade"
+          >
+            × Close
+          </button>
+        </div>
+        <h2 id="trade-title" className="mt-4 text-3xl font-semibold tracking-[-0.05em] sm:text-4xl">
+          Build the trade.
+        </h2>
+
+        <div className="mt-6 grid grid-cols-[minmax(0,1fr)_2rem_minmax(0,1fr)] items-start gap-2 sm:mt-8 sm:grid-cols-[minmax(0,1fr)_4.5rem_minmax(0,1fr)] sm:gap-4">
+          <TradeSide
+            title="You"
+            company="Your Company"
+            tone={userStartsWithCash ? 'buyer' : 'provider'}
+            offers={yourOffers}
+            setOffers={setYourOffers}
+          />
+          <div className="flex flex-col items-center pt-14 text-center font-mono text-[8px] uppercase tracking-[0.08em] sm:pt-14 sm:text-[10px]">
+            <span>Trade</span>
+            <span className="mt-3 text-2xl leading-none sm:mt-4 sm:text-4xl">→</span>
+            <span className="-mt-1 text-2xl leading-none sm:-mt-2 sm:text-4xl">←</span>
+            <button type="button" className="mt-3 underline sm:mt-5">Rules</button>
+          </div>
+          <TradeSide
+            title="Company B"
+            company={item.company}
+            tone={userStartsWithCash ? 'provider' : 'buyer'}
+            offers={theirOffers}
+            setOffers={setTheirOffers}
+          />
+        </div>
+
+        <div className="mt-5 border-t-2 border-ink pt-3 font-mono text-[9px] uppercase tracking-[0.04em] text-muted sm:mt-6 sm:text-[10px]">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>Balance: difference [—] · Term [6 months] · Delivery [pickup by B]</span>
+            <span>[—] kg CO₂ avoided</span>
+          </div>
+        </div>
+
+        <div className="mt-5 border-t border-ink/15 pt-4 sm:mt-6">
+          <div className="flex items-center justify-between gap-3 font-mono text-[9px] uppercase tracking-[0.06em] text-muted sm:text-[10px]">
+            <span>{acceptedBy.you ? 'You accepted' : 'You not accepted'}</span>
+            <div className="hidden flex-1 items-center justify-center sm:flex" aria-hidden="true">
+              <span className="w-3/4 border-t-2 border-dashed border-ink/30" />
+              <span className="-ml-2 h-4 w-4 rotate-45 border-2 border-ink/40 bg-paper" />
+            </div>
+            <span>{acceptedBy.them ? 'Company accepted' : 'Company waiting'}</span>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted underline hover:text-ink"
+            >
+              Decline
+            </button>
+            <button
+              type="button"
+              onClick={() => accept('you')}
+              disabled={acceptedBy.you || isComplete}
+              className="border-2 border-ink px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] hover:bg-ink hover:text-paper disabled:cursor-default disabled:opacity-60 sm:px-8"
+            >
+              <span className="mr-2 text-provider">●</span>
+              {acceptedBy.you ? 'You accepted' : 'You accept'}
+            </button>
+            <button
+              type="button"
+              onClick={() => accept('them')}
+              disabled={acceptedBy.them || isComplete}
+              className="border-2 border-ink px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] hover:bg-ink hover:text-paper disabled:cursor-default disabled:opacity-60 sm:px-8"
+            >
+              <span className="mr-2 text-buyer">○</span>
+              {acceptedBy.them ? 'Company accepted' : `${item.company} accepts`}
+            </button>
+          </div>
+        </div>
+
+        {isComplete && (
+          <div
+            role="status"
+            className="mt-4 border border-provider/40 bg-provider/10 px-4 py-3 text-center text-sm font-semibold text-provider"
+          >
+            Trade successful, matched!
+          </div>
+        )}
+
+        <div className="absolute bottom-4 left-4 flex h-9 w-9 items-center justify-center border border-ink/30 text-muted sm:bottom-6 sm:left-6" aria-hidden="true">
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l1.8-3.1A7.5 7.5 0 1 1 20 11.5Z" />
+            <path d="M8.5 11.5h7M8.5 14.5h4" />
+          </svg>
+        </div>
+      </section>
     </div>
   )
 }
@@ -597,6 +870,7 @@ export default function App() {
   const [extraNodes, setExtraNodes] = useState([])
   const [formOpen, setFormOpen] = useState(false)
   const [accepted, setAccepted] = useState({})
+  const [activeTrade, setActiveTrade] = useState(null)
   const [stats, setStats] = useState({ streams: 12.4, saved: 8420, co2: 6240 })
 
   useEffect(() => {
@@ -620,11 +894,16 @@ export default function App() {
 
   function handleAccept(item) {
     if (accepted[item.id]) return
-    setAccepted((prev) => ({ ...prev, [item.id]: true }))
+    setActiveTrade(item)
+  }
+
+  function handleTradeComplete() {
+    if (!activeTrade || accepted[activeTrade.id]) return
+    setAccepted((prev) => ({ ...prev, [activeTrade.id]: true }))
     setStats((s) => ({
       streams: Number((s.streams + 0.4).toFixed(1)),
-      saved: s.saved + item.save,
-      co2: s.co2 + Math.round(item.save * 1.4),
+      saved: s.saved + activeTrade.save,
+      co2: s.co2 + Math.round(activeTrade.save * 1.4),
     }))
   }
 
@@ -719,6 +998,14 @@ export default function App() {
 
       {formOpen && (
         <StreamForm side={side} onClose={() => setFormOpen(false)} onCreate={handleCreate} />
+      )}
+      {activeTrade && (
+        <TradeModal
+          key={activeTrade.id}
+          item={activeTrade}
+          onClose={() => setActiveTrade(null)}
+          onComplete={handleTradeComplete}
+        />
       )}
     </div>
   )
