@@ -65,6 +65,46 @@ body {
   animation: node-breathe 4.8s ease-in-out infinite;
 }
 
+.company-map-marker {
+  border: 0;
+  background: transparent;
+}
+
+.company-map-marker svg {
+  display: block;
+  height: 32px;
+  width: 26px;
+  filter: drop-shadow(0 1px 2px rgb(20 22 20 / 35%));
+  transform-origin: bottom center;
+  transition: transform 120ms ease;
+}
+
+.company-map-marker.is-selected svg {
+  transform: scale(1.2);
+}
+
+.pin-buyer {
+  fill: #3b6fd8;
+  stroke: white;
+  stroke-width: 1;
+}
+
+.pin-provider {
+  fill: #2f7a3c;
+  stroke: white;
+  stroke-width: 1;
+}
+
+.pin-other {
+  fill: #858b80;
+  stroke: white;
+  stroke-width: 1;
+}
+
+.pin-center {
+  fill: white;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .network-flow,
   .node-halo {

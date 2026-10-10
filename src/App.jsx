@@ -1,27 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 
 const MATERIALS = ['steel', 'plastic', 'paper', 'glass', 'heat', 'water', 'CO₂', 'other']
 
 const INITIAL_NODES = [
-  { id: 'greenpack', x: 22, y: 26, type: 'buyer', name: 'GreenPack Industries', material: 'plastic', note: 'Needs plastic pellets' },
-  { id: 'ecosteel', x: 40, y: 40, type: 'provider', name: 'EcoSteel Industries', material: 'steel', note: 'Offers scrap steel' },
-  { id: 'polyloop', x: 48, y: 30, type: 'provider', name: 'PolyLoop Ltd', material: 'plastic', note: 'Offers plastic pellets' },
-  { id: 'thermal', x: 62, y: 48, type: 'provider', name: 'Thermal Solutions Ltd', material: 'heat', note: 'Offers waste heat' },
-  { id: 'printworks', x: 72, y: 24, type: 'buyer', name: 'PrintWorks Co', material: 'paper', note: 'Needs paper scrap' },
-  { id: 'forge', x: 28, y: 62, type: 'provider', name: 'Forge & Form', material: 'glass', note: 'Offers glass cullet' },
-  { id: 'aquacycle', x: 52, y: 68, type: 'provider', name: 'AquaCycle Industries', material: 'water', note: 'Offers process water' },
-  { id: 'northmill', x: 68, y: 62, type: 'other', name: 'North Mill', material: 'other', note: 'Idle capacity' },
-  { id: 'delta', x: 16, y: 48, type: 'other', name: 'Delta Plant', material: 'other', note: 'Observing' },
-  { id: 'kiln', x: 78, y: 42, type: 'buyer', name: 'Kiln District', material: 'heat', note: 'Needs process heat' },
-]
-
-const CONNECTIONS = [
-  { from: 'polyloop', to: 'greenpack', kind: 'active', match: 92, km: 4.2 },
-  { from: 'ecosteel', to: 'forge', kind: 'potential' },
-  { from: 'thermal', to: 'kiln', kind: 'potential' },
-  { from: 'aquacycle', to: 'greenpack', kind: 'potential' },
-  { from: 'printworks', to: 'northmill', kind: 'potential' },
-  { from: 'delta', to: 'ecosteel', kind: 'potential' },
+  { id: 'greenpack', lat: 12.9716, lng: 77.6412, type: 'buyer', name: 'GreenPack Industries', material: 'plastic', note: 'Needs plastic pellets' },
+  { id: 'ecosteel', lat: 12.955, lng: 77.568, type: 'provider', name: 'EcoSteel Industries', material: 'steel', note: 'Offers scrap steel' },
+  { id: 'polyloop', lat: 12.986, lng: 77.603, type: 'provider', name: 'PolyLoop Ltd', material: 'plastic', note: 'Offers plastic pellets' },
+  { id: 'thermal', lat: 12.968, lng: 77.625, type: 'provider', name: 'Thermal Solutions Ltd', material: 'heat', note: 'Offers waste heat' },
+  { id: 'printworks', lat: 13.003, lng: 77.59, type: 'buyer', name: 'PrintWorks Co', material: 'paper', note: 'Needs paper scrap' },
+  { id: 'forge', lat: 12.936, lng: 77.577, type: 'provider', name: 'Forge & Form', material: 'glass', note: 'Offers glass cullet' },
+  { id: 'aquacycle', lat: 12.944, lng: 77.622, type: 'provider', name: 'AquaCycle Industries', material: 'water', note: 'Offers process water' },
+  { id: 'northmill', lat: 12.957, lng: 77.632, type: 'other', name: 'North Mill', material: 'other', note: 'Idle capacity' },
+  { id: 'delta', lat: 12.969, lng: 77.548, type: 'other', name: 'Delta Plant', material: 'other', note: 'Observing' },
+  { id: 'kiln', lat: 12.987, lng: 77.635, type: 'buyer', name: 'Kiln District', material: 'heat', note: 'Needs process heat' },
 ]
 
 const INITIAL_LISTINGS = [
@@ -49,10 +42,6 @@ function clamp(n, min, max) {
 
 function easeInOut(t) {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
-}
-
-function nodeById(id) {
-  return INITIAL_NODES.find((n) => n.id === id)
 }
 
 function Header({ streams, saved, co2 }) {
@@ -200,148 +189,106 @@ function HeroNetwork() {
   )
 }
 
-function MapNode({ node, selected, onSelect, zoom }) {
-  const r = node.type === 'other' ? 5 : 7
-  const selectedBoost = selected ? 1.25 : 1
-  return (
-    <g
-      transform={`translate(${node.x} ${node.y})`}
-      className="cursor-pointer"
-      onClick={(e) => {
-        e.stopPropagation()
-        onSelect(node.id)
-      }}
-    >
-      {selected && (
-        <circle r={18 / zoom} fill={node.type === 'buyer' ? '#3b6fd8' : '#2f7a3c'} opacity="0.12" />
-      )}
-      {node.type === 'provider' && (
-        <>
-          <circle r={(r + 6) / zoom} fill="#2f7a3c" opacity="0.18" className="node-halo" />
-          <circle r={r / zoom} fill="#2f7a3c" />
-        </>
-      )}
-      {node.type === 'buyer' && (
-        <circle r={(r * selectedBoost) / zoom} fill="none" stroke="#3b6fd8" strokeWidth={2.2 / zoom} />
-      )}
-      {node.type === 'other' && (
-        <circle r={r / zoom} fill="#9aa194" />
-      )}
-      {selected && (
-        <g transform={`translate(${12 / zoom} ${-16 / zoom})`}>
-          <rect x="0" y="-10" width="132" height="28" rx="2" fill="#f4f5f0" stroke="#c4c8be" />
-          <text x="8" y="2" fontSize="8" fill="#141614" fontWeight="600">
-            {node.name}
-          </text>
-          <text x="8" y="12" fontSize="7" fill="#6a6e66">
-            {node.note}
-          </text>
-        </g>
-      )}
-    </g>
-  )
+function companyPinIcon(node, selected) {
+  const color = node.type === 'buyer'
+    ? 'buyer'
+    : node.type === 'provider'
+      ? 'provider'
+      : 'other'
+  return L.divIcon({
+    className: `company-map-marker${selected ? ' is-selected' : ''}`,
+    html: `<svg viewBox="0 0 24 24" aria-hidden="true"><path class="pin-${color}" d="M12 22s8-4.5 8-12a8 8 0 1 0-16 0c0 7.5 8 12 8 12Z"/><circle cx="12" cy="10" r="2.6" class="pin-center"/></svg>`,
+    iconSize: [26, 32],
+    iconAnchor: [13, 31],
+  })
 }
-//map fxn below(to be replaced)
-function IndustrialMap({ selectedId, onSelect, extraNodes }) {
-  const [zoom, setZoom] = useState(1)
-  const nodes = [...INITIAL_NODES, ...extraNodes]
 
-  const paths = CONNECTIONS.map((c) => {
-    const a = nodeById(c.from)
-    const b = nodeById(c.to)
-    if (!a || !b) return null
-    const mx = (a.x + b.x) / 2
-    const my = (a.y + b.y) / 2 - 8
-    return { ...c, d: `M ${a.x} ${a.y} Q ${mx} ${my} ${b.x} ${b.y}` }
-  }).filter(Boolean)
+function IndustrialMap({ selectedId, onSelect, extraNodes }) {
+  const mapElement = useRef(null)
+  const markerLayer = useRef(null)
+  const markers = useRef(new Map())
+  const onSelectRef = useRef(onSelect)
+  const nodes = useMemo(() => [...INITIAL_NODES, ...extraNodes], [extraNodes])
+
+  useEffect(() => {
+    onSelectRef.current = onSelect
+  }, [onSelect])
+
+  useEffect(() => {
+    const markerRegistry = markers.current
+    const map = L.map(mapElement.current, {
+      scrollWheelZoom: false,
+      zoomControl: true,
+    }).setView([12.97, 77.594], 12)
+    markerLayer.current = L.layerGroup().addTo(map)
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map)
+
+    map.on('click', () => onSelectRef.current(null))
+    const resizeObserver = new ResizeObserver(() => map.invalidateSize())
+    resizeObserver.observe(mapElement.current)
+
+    return () => {
+      resizeObserver.disconnect()
+      map.remove()
+      markerLayer.current = null
+      markerRegistry.clear()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!markerLayer.current) return
+    markerLayer.current.clearLayers()
+    markers.current.clear()
+
+    nodes.forEach((node) => {
+      const marker = L.marker([node.lat, node.lng], {
+        icon: companyPinIcon(node, false),
+        keyboard: true,
+        title: `${node.name} — ${node.type === 'buyer' ? 'Buyer' : node.type === 'provider' ? 'Supplier' : 'Other company'}`,
+      })
+      const popup = document.createElement('div')
+      const companyName = document.createElement('strong')
+      companyName.textContent = node.name
+      const companyNote = document.createElement('div')
+      companyNote.textContent = node.note
+      popup.append(companyName, companyNote)
+      marker.bindPopup(popup)
+      marker.on('click', () => onSelectRef.current(node.id))
+      markers.current.set(node.id, marker)
+      markerLayer.current.addLayer(marker)
+    })
+  }, [nodes])
+
+  useEffect(() => {
+    nodes.forEach((node) => {
+      const marker = markers.current.get(node.id)
+      if (!marker) return
+      const selected = node.id === selectedId
+      marker.setIcon(companyPinIcon(node, selected))
+      marker.setZIndexOffset(selected ? 1000 : 0)
+    })
+  }, [nodes, selectedId])
 
   return (
-    <div className="relative h-full min-h-[52vh] overflow-hidden border-r border-ink/10 bg-[#e4e7df] lg:min-h-0">
-      <div className="absolute left-4 top-4 z-10 flex items-center gap-2 text-[11px] text-muted">
-        <span className="inline-block h-3 w-2.5 border border-ink/30" />
-        Bengaluru industrial basin
+    <div className="relative h-[min(48vh,30rem)] min-h-[18rem] overflow-hidden border-r border-ink/10 bg-[#e4e7df] lg:h-[min(55vh,34rem)] lg:min-h-[24rem] lg:self-start">
+      <div
+        ref={mapElement}
+        className="h-full w-full"
+        role="application"
+        aria-label="OpenStreetMap of Bengaluru with buyer and supplier locations"
+      />
+      <div className="pointer-events-none absolute right-3 top-3 z-[500] border border-ink/15 bg-paper/90 px-2.5 py-1.5 text-[10px] text-ink/80">
+        Approximate demo locations · Bengaluru
       </div>
 
-      <svg
-        viewBox="0 0 100 100"
-        className="h-full w-full cursor-grab"
-        onClick={() => onSelect(null)}
-        role="img"
-        aria-label="Industrial network visualization"
-      >
-        <g transform={`translate(50 52) scale(${zoom}) translate(-50 -52)`}>
-          <path d="M8 22 C22 10 40 14 52 8 C70 2 88 12 94 28 C98 46 88 62 90 80 C70 96 40 92 18 86 C4 70 2 42 8 22Z" fill="#d5d9ce" />
-          <path d="M12 48 C24 44 30 58 42 54 C50 62 40 74 28 70 C16 66 8 58 12 48Z" fill="#cdd2c4" />
-          <path d="M58 18 C70 16 82 22 86 34 C80 40 66 32 58 18Z" fill="#c9cec0" />
-          <path d="M48 0 C50 28 46 54 52 100" fill="none" stroke="#c5d0d4" strokeWidth="2.4" opacity="0.9" />
-          <path d="M0 36 C18 34 30 40 48 36" fill="none" stroke="#d7dcd3" strokeWidth="0.4" />
-          <path d="M0 72 C22 68 40 76 70 70" fill="none" stroke="#d7dcd3" strokeWidth="0.4" />
-
-          {paths.map((p) => (
-            <path
-              key={`${p.from}-${p.to}`}
-              d={p.d}
-              fill="none"
-              stroke={p.kind === 'active' ? '#2f7a3c' : '#9aa194'}
-              strokeWidth={p.kind === 'active' ? 0.55 : 0.28}
-              strokeDasharray={p.kind === 'active' ? '1.4 1.1' : '0.7 0.9'}
-              className={p.kind === 'active' ? 'network-flow' : undefined}
-            />
-          ))}
-
-          {paths
-            .filter((p) => p.kind === 'active')
-            .map((p) => (
-              <text key={`label-${p.from}`} x="34" y="24" fontSize="2.1" fill="#6a6e66" letterSpacing="0.18">
-                MATCH · [{p.match}%] · [{p.km} km]
-              </text>
-            ))}
-
-          {nodes.map((node) => (
-            <MapNode
-              key={node.id}
-              node={node}
-              selected={selectedId === node.id}
-              onSelect={onSelect}
-              zoom={zoom}
-            />
-          ))}
-        </g>
-      </svg>
-
-      <div className="absolute bottom-16 left-4 z-10 space-y-1 text-[10px] uppercase tracking-[0.14em] text-muted">
-        <p className="flex items-center gap-2">
-          <span className="h-px w-6 bg-provider" /> Active match
-        </p>
-        <p className="flex items-center gap-2">
-          <span className="h-px w-6 border-t border-dashed border-muted" /> Potential match
-        </p>
-        <p className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-provider" /> Factory (seller)
-        </p>
-        <p className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 rounded-full border-2 border-buyer" /> Factory (buyer)
-        </p>
-        <p className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-[#9aa194]" /> Other company
-        </p>
-      </div>
-
-      <div className="absolute bottom-4 right-4 z-10 flex overflow-hidden border border-ink/20 bg-paper/80">
-        <button
-          type="button"
-          className="px-3 py-1.5 text-sm hover:bg-ink hover:text-paper"
-          onClick={() => setZoom((z) => clamp(Number((z + 0.15).toFixed(2)), 0.7, 1.8))}
-        >
-          +
-        </button>
-        <button
-          type="button"
-          className="border-l border-ink/20 px-3 py-1.5 text-sm hover:bg-ink hover:text-paper"
-          onClick={() => setZoom((z) => clamp(Number((z - 0.15).toFixed(2)), 0.7, 1.8))}
-        >
-          −
-        </button>
+      <div className="pointer-events-none absolute bottom-3 left-3 z-[500] flex flex-wrap gap-x-3 gap-y-1 border border-ink/15 bg-paper/90 px-2.5 py-2 text-[9px] uppercase tracking-[0.08em] text-ink/80">
+        <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-buyer" /> Buyer</span>
+        <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-provider" /> Supplier</span>
+        <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-[#858b80]" /> Other</span>
       </div>
     </div>
   )
@@ -910,14 +857,14 @@ export default function App() {
   function handleCreate(form) {
     const id = `n-${Date.now()}`
     const listingId = `l-${Date.now()}`
-    const x = 20 + Math.random() * 60
-    const y = 20 + Math.random() * 60
+    const lat = 12.93 + Math.random() * 0.07
+    const lng = 77.54 + Math.random() * 0.1
     setExtraNodes((nodes) => [
       ...nodes,
       {
         id,
-        x,
-        y,
+        lat,
+        lng,
         type: side === 'have' ? 'provider' : 'buyer',
         name: form.company,
         material: form.material,
@@ -969,7 +916,7 @@ export default function App() {
           setSide={chooseSide}
           onListStream={() => setFormOpen(true)}
         />
-        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,0.85fr)_minmax(380px,1.15fr)]">
           <IndustrialMap
             selectedId={selectedId}
             onSelect={setSelectedId}
