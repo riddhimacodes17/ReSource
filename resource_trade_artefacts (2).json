@@ -1,0 +1,133 @@
+{
+  "normalization_mappings": {
+    "streams": [
+      "Steel",
+      "Plastic",
+      "Paper",
+      "Water",
+      "Glass"
+    ],
+    "types": {
+      "Steel": [
+        "Mixed steel scrap",
+        "Carbon steel scrap",
+        "Stainless steel scrap",
+        "Steel sheets and plates"
+      ],
+      "Plastic": [
+        "Mixed plastics",
+        "PET",
+        "HDPE",
+        "LDPE",
+        "PP",
+        "PVC",
+        "PS"
+      ],
+      "Paper": [
+        "Mixed paper",
+        "Corrugated cardboard"
+      ],
+      "Water": [
+        "Water",
+        "Process water",
+        "Cooling water",
+        "Treated water"
+      ],
+      "Glass": [
+        "Mixed glass",
+        "Coloured glass"
+      ]
+    }
+  },
+  "feature_schema": {
+    "numeric_features": [
+      "required_quantity",
+      "available_quantity",
+      "distance_km"
+    ],
+    "categorical_features": [
+      "buyer_stream_clean",
+      "buyer_type_clean",
+      "seller_stream_clean",
+      "seller_type_clean",
+      "buyer_primary_stream",
+      "seller_primary_stream",
+      "buyer_region",
+      "seller_region",
+      "product_compat",
+      "dist_category",
+      "qty_compare"
+    ]
+  },
+  "evaluation_metrics": {
+    "accuracy": 0.6987704918032787,
+    "roc_auc": 0.7848974636161218,
+    "classification_report": {
+      "Rejected": {
+        "precision": 0.8423988842398884,
+        "recall": 0.648068669527897,
+        "f1-score": 0.7325651910248635,
+        "support": 932.0
+      },
+      "Accepted": {
+        "precision": 0.5609103078982597,
+        "recall": 0.7875939849624061,
+        "f1-score": 0.655199374511337,
+        "support": 532.0
+      },
+      "accuracy": 0.6987704918032787,
+      "macro avg": {
+        "precision": 0.7016545960690741,
+        "recall": 0.7178313272451515,
+        "f1-score": 0.6938822827681003,
+        "support": 1464.0
+      },
+      "weighted avg": {
+        "precision": 0.7401093196130123,
+        "recall": 0.6987704918032787,
+        "f1-score": 0.7044513833847023,
+        "support": 1464.0
+      }
+    }
+  },
+  "training_info": {
+    "train_size": 5736,
+    "test_size": 1464,
+    "random_state": 42
+  },
+  "confidence_method": {
+    "formula": "confidence = max(predict_proba(X))",
+    "description": "Confidence for a prediction equals the probability the model assigns to the class it chose.  It equals P(accepted) when the prediction is ACCEPTED and P(rejected) when the prediction is REJECTED.  It is therefore the model's estimated probability that the predicted outcome is correct.",
+    "reliability_check": {
+      "method": "Brier score + reliability diagram on held-out test set",
+      "brier_score_test": 0.1938410561222823,
+      "n_bins_reliability": 10,
+      "reliability_prob_pred": [
+        0.07249743197061076,
+        0.1453842202729482,
+        0.24738266848423685,
+        0.3493705721200691,
+        0.4506075579940853,
+        0.5517252013571252,
+        0.6504049758711451,
+        0.7498375462304656,
+        0.8445136513705069,
+        0.9103177308751357
+      ],
+      "reliability_prob_true": [
+        0.11570247933884298,
+        0.12021857923497267,
+        0.11042944785276074,
+        0.20224719101123595,
+        0.2546583850931677,
+        0.3867403314917127,
+        0.47342995169082125,
+        0.6217391304347826,
+        0.8333333333333334,
+        1.0
+      ],
+      "interpretation": "Brier score is a strictly proper scoring rule (0 = perfect, 0.25 = random).  A reliability diagram close to the diagonal indicates well-calibrated probabilities, which is what makes the confidence score trustworthy."
+    },
+    "calibrated": false
+  }
+}
