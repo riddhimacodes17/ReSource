@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "candidateStatus": "not-approved-not-for-application-runtime",
+  "checkedAt": "2026-10-10T22:40:06+00:00",
+  "source": {
+    "organization": "US EPA",
+    "name": "Waste Reduction Model (WARM), Version 16",
+    "workbookUrl": "https://www.epa.gov/system/files/documents/2023-12/warm_v16.xls",
+    "publicationDate": "December 2023",
+    "sha256": "5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22",
+    "layout": {
+      "sheet": "Summary Data",
+      "headerRow": 1,
+      "materialColumn": "A",
+      "recyclingColumn": "C",
+      "recyclingHeader": "Recycling of Post-Consumer Material: Default or Customized Transportation Distance"
+    }
+  },
+  "factorCandidates": {
+    "glass": {
+      "sourceLabel": "Glass",
+      "sourceValue": -0.2760901764592596,
+      "factor": 0.30433732434615207,
+      "sourceLocation": "Summary Data!C5; header C1: Recycling of Post-Consumer Material: Default or Customized Transportation Distance",
+      "modelLocation": "Summary Data!C5",
+      "unit": "kg CO2e potential net benefit per kg material",
+      "sourceUnit": "MTCO2e/short ton",
+      "sourceUrl": "https://www.epa.gov/system/files/documents/2023-12/warm_containers_packaging_and_non-durable_goods_materials_v16_dec.pdf",
+      "modelUrl": "https://www.epa.gov/system/files/documents/2023-12/warm_v16.xls",
+      "modelSha256": "5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22",
+      "year": 2023,
+      "publicationDate": "December 2023",
+      "reviewStatus": "extracted-awaiting-review",
+      "approvedFactor": 0.30433732434615207,
+      "approvedSourceValue": -0.2760901764592596,
+      "approvedModelLocation": "Summary Data!C5",
+      "approvedModelSha256": "5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22",
+      "manualReview": [
+        "Verify the factor in the matching official materials table.",
+        "Confirm the current material definition, system boundary, and assumptions."
+      ]
+    },
+    "plastic": {
+      "sourceLabel": "Mixed Plastics",
+      "sourceValue": -0.9255234067519946,
+      "factor": 1.0202149197879966,
+      "sourceLocation": "Summary Data!C35; header C1: Recycling of Post-Consumer Material: Default or Customized Transportation Distance",
+      "modelLocation": "Summary Data!C35",
+      "unit": "kg CO2e potential net benefit per kg material",
+      "sourceUnit": "MTCO2e/short ton",
+      "sourceUrl": "https://www.epa.gov/system/files/documents/2023-12/warm_containers_packaging_and_non-durable_goods_materials_v16_dec.pdf",
+      "modelUrl": "https://www.epa.gov/system/files/documents/2023-12/warm_v16.xls",
+      "modelSha256": "5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22",
+      "year": 2023,
+      "publicationDate": "December 2023",
+      "reviewStatus": "extracted-awaiting-review",
+      "approvedFactor": 1.0202149197879966,
+      "approvedSourceValue": -0.9255234067519946,
+      "approvedModelLocation": "Summary Data!C35",
+      "approvedModelSha256": "5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22",
+      "manualReview": [
+        "Verify the factor in the matching official materials table.",
+        "Confirm the current material definition, system boundary, and assumptions."
+      ]
+    },
+    "paper": {
+      "sourceLabel": "Mixed Paper (general)",
+      "sourceValue": -3.5455235990647034,
+      "factor": 3.908270766398367,
+      "sourceLocation": "Summary Data!C31; header C1: Recycling of Post-Consumer Material: Default or Customized Transportation Distance",
+      "modelLocation": "Summary Data!C31",
+      "unit": "kg CO2e potential net benefit per kg material",
+      "sourceUnit": "MTCO2e/short ton",
+      "sourceUrl": "https://www.epa.gov/system/files/documents/2023-12/warm_containers_packaging_and_non-durable_goods_materials_v16_dec.pdf",
+      "modelUrl": "https://www.epa.gov/system/files/documents/2023-12/warm_v16.xls",
+      "modelSha256": "5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22",
+      "year": 2023,
+      "publicationDate": "December 2023",
+      "reviewStatus": "extracted-awaiting-review",
+      "approvedFactor": 3.908270766398367,
+      "approvedSourceValue": -3.5455235990647034,
+      "approvedModelLocation": "Summary Data!C31",
+      "approvedModelSha256": "5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22",
+      "manualReview": [
+        "Verify the factor in the matching official materials table.",
+        "Confirm the current material definition, system boundary, and assumptions."
+      ]
+    }
+  },
+  "notUpdated": {
+    "steelScrap": "Manually sourced Broadbent (2016) benchmark; intentionally unchanged.",
+    "heat": "Unsupported; no factor extracted.",
+    "water": "Unsupported; no factor extracted."
+  }
+}

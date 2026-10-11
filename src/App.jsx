@@ -1,40 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
+import { maplibreGL } from '@maplibre/maplibre-gl-leaflet'
+import { setWorkerUrl } from 'maplibre-gl'
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import 'leaflet/dist/leaflet.css'
+import 'maplibre-gl/dist/maplibre-gl.css'
+import { DISTANCES, INDUSTRIES, INITIAL_LISTINGS, INITIAL_NODES, MATERIALS } from './data/seed'
+import { calcImpact, EMISSION_FACTORS } from './shared/impact'
+import { haversineKm, rankMatches } from './shared/match'
 
-const MATERIALS = ['steel', 'plastic', 'paper', 'glass', 'heat', 'water', 'CO₂', 'other']
+setWorkerUrl(workerUrl)
 
-const INITIAL_NODES = [
-  { id: 'greenpack', lat: 12.9716, lng: 77.6412, type: 'buyer', name: 'GreenPack Industries', material: 'plastic', note: 'Needs plastic pellets' },
-  { id: 'ecosteel', lat: 12.955, lng: 77.568, type: 'provider', name: 'EcoSteel Industries', material: 'steel', note: 'Offers scrap steel' },
-  { id: 'polyloop', lat: 12.986, lng: 77.603, type: 'provider', name: 'PolyLoop Ltd', material: 'plastic', note: 'Offers plastic pellets' },
-  { id: 'thermal', lat: 12.968, lng: 77.625, type: 'provider', name: 'Thermal Solutions Ltd', material: 'heat', note: 'Offers waste heat' },
-  { id: 'printworks', lat: 13.003, lng: 77.59, type: 'buyer', name: 'PrintWorks Co', material: 'paper', note: 'Needs paper scrap' },
-  { id: 'forge', lat: 12.936, lng: 77.577, type: 'provider', name: 'Forge & Form', material: 'glass', note: 'Offers glass cullet' },
-  { id: 'aquacycle', lat: 12.944, lng: 77.622, type: 'provider', name: 'AquaCycle Industries', material: 'water', note: 'Offers process water' },
-  { id: 'northmill', lat: 12.957, lng: 77.632, type: 'other', name: 'North Mill', material: 'other', note: 'Idle capacity' },
-  { id: 'delta', lat: 12.969, lng: 77.548, type: 'other', name: 'Delta Plant', material: 'other', note: 'Observing' },
-  { id: 'kiln', lat: 12.987, lng: 77.635, type: 'buyer', name: 'Kiln District', material: 'heat', note: 'Needs process heat' },
-]
-
-const INITIAL_LISTINGS = [
-  { id: 'l1', mode: 'buy', material: 'steel', title: 'Scrap Steel', qty: '500 kg / day', company: 'EcoSteel Industries', nodeId: 'ecosteel', distance: 4.2, reliability: 4.8, save: 420, industry: 'Metals' },
-  { id: 'l2', mode: 'buy', material: 'plastic', title: 'Plastic Pellets', qty: '800 kg / day', company: 'PolyLoop Ltd', nodeId: 'polyloop', distance: 6.1, reliability: 4.6, save: 780, industry: 'Packaging' },
-  { id: 'l3', mode: 'buy', material: 'heat', title: 'Waste Heat', qty: '2,000 kWh / day', company: 'Thermal Solutions Ltd', nodeId: 'thermal', distance: 7.3, reliability: 4.4, save: 310, industry: 'Energy' },
-  { id: 'l4', mode: 'buy', material: 'water', title: 'Process Water', qty: '5,000 L / day', company: 'AquaCycle Industries', nodeId: 'aquacycle', distance: 8.7, reliability: 4.2, save: 620, industry: 'Utilities' },
-  { id: 'l5', mode: 'buy', material: 'glass', title: 'Glass Cullet', qty: '320 kg / day', company: 'Forge & Form', nodeId: 'forge', distance: 5.4, reliability: 4.5, save: 190, industry: 'Materials' },
-  { id: 'l6', mode: 'sell', material: 'plastic', title: 'Plastic Pellets', qty: '800 kg / day', company: 'GreenPack Industries', nodeId: 'greenpack', distance: 6.1, reliability: 4.7, save: 780, industry: 'Packaging' },
-  { id: 'l7', mode: 'sell', material: 'paper', title: 'Paper Scrap', qty: '1.2 t / day', company: 'PrintWorks Co', nodeId: 'printworks', distance: 9.4, reliability: 4.1, save: 240, industry: 'Print' },
-  { id: 'l8', mode: 'sell', material: 'heat', title: 'Process Heat', qty: '1,400 kWh / day', company: 'Kiln District', nodeId: 'kiln', distance: 7.3, reliability: 4.3, save: 310, industry: 'Ceramics' },
-]
-
-const INDUSTRIES = ['All', 'Metals', 'Packaging', 'Energy', 'Utilities', 'Materials', 'Print', 'Ceramics']
-const DISTANCES = [
-  { id: 'all', label: 'Any distance' },
-  { id: '5', label: 'Under 5 km' },
-  { id: '8', label: 'Under 8 km' },
-  { id: '12', label: 'Under 12 km' },
-]
+const DEFAULT_USER_LOCATION = [12.9716, 77.5946]
 
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n))
@@ -51,7 +28,7 @@ function Header({ streams, saved, co2 }) {
         <p className="text-[15px] font-semibold tracking-[-0.03em]">ReSource</p>
       </div>
       <p className="max-w-[70%] text-right text-[10px] font-medium uppercase tracking-[0.18em] text-muted">
-        [{streams}] streams diverted / ${saved.toLocaleString()} saved / [{co2.toLocaleString()}] kg CO₂ avoided
+        [{streams}] streams diverted / ₹{saved.toLocaleString()} saved / [{co2 == null ? '—' : Math.round(co2).toLocaleString()}] kg CO₂e potential recycling benefit
       </p>
     </header>
   )
@@ -203,11 +180,13 @@ function companyPinIcon(node, selected) {
   })
 }
 
-function IndustrialMap({ selectedId, onSelect, extraNodes }) {
+function IndustrialMap({ selectedId, onSelect, extraNodes, userLocation, setUserLocation }) {
   const mapElement = useRef(null)
   const markerLayer = useRef(null)
   const markers = useRef(new Map())
   const onSelectRef = useRef(onSelect)
+  const setUserLocationRef = useRef(setUserLocation)
+  const userMarker = useRef(null)
   const nodes = useMemo(() => [...INITIAL_NODES, ...extraNodes], [extraNodes])
 
   useEffect(() => {
@@ -215,16 +194,37 @@ function IndustrialMap({ selectedId, onSelect, extraNodes }) {
   }, [onSelect])
 
   useEffect(() => {
+    setUserLocationRef.current = setUserLocation
+  }, [setUserLocation])
+
+  useEffect(() => {
     const markerRegistry = markers.current
     const map = L.map(mapElement.current, {
       scrollWheelZoom: false,
       zoomControl: true,
     }).setView([12.97, 77.594], 12)
+    map.attributionControl.addAttribution(
+      '<a href="https://openfreemap.org">OpenFreeMap</a> <a href="https://www.openmaptiles.org/">© OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>',
+    )
     markerLayer.current = L.layerGroup().addTo(map)
+    userMarker.current = L.marker(DEFAULT_USER_LOCATION, {
+      draggable: true,
+      title: 'You',
+      icon: L.divIcon({
+        className: 'user-map-marker',
+        html: '<span>You</span>',
+        iconSize: [40, 28],
+        iconAnchor: [20, 14],
+      }),
+    }).addTo(map)
+    userMarker.current.on('dragend', (event) => {
+      const { lat, lng } = event.target.getLatLng()
+      setUserLocationRef.current([lat, lng])
+    })
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maplibreGL({
+      style: 'https://tiles.openfreemap.org/styles/liberty',
+      attributionControl: false,
     }).addTo(map)
 
     map.on('click', () => onSelectRef.current(null))
@@ -235,16 +235,21 @@ function IndustrialMap({ selectedId, onSelect, extraNodes }) {
       resizeObserver.disconnect()
       map.remove()
       markerLayer.current = null
+      userMarker.current = null
       markerRegistry.clear()
     }
   }, [])
+
+  useEffect(() => {
+    userMarker.current?.setLatLng(userLocation)
+  }, [userLocation])
 
   useEffect(() => {
     if (!markerLayer.current) return
     markerLayer.current.clearLayers()
     markers.current.clear()
 
-    nodes.forEach((node) => {
+    nodes.filter((node) => node.type !== 'other').forEach((node) => {
       const marker = L.marker([node.lat, node.lng], {
         icon: companyPinIcon(node, false),
         keyboard: true,
@@ -281,14 +286,10 @@ function IndustrialMap({ selectedId, onSelect, extraNodes }) {
         role="application"
         aria-label="OpenStreetMap of Bengaluru with buyer and supplier locations"
       />
-      <div className="pointer-events-none absolute right-3 top-3 z-[500] border border-ink/15 bg-paper/90 px-2.5 py-1.5 text-[10px] text-ink/80">
-        Approximate demo locations · Bengaluru
-      </div>
 
       <div className="pointer-events-none absolute bottom-3 left-3 z-[500] flex flex-wrap gap-x-3 gap-y-1 border border-ink/15 bg-paper/90 px-2.5 py-2 text-[9px] uppercase tracking-[0.08em] text-ink/80">
         <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-buyer" /> Buyer</span>
         <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-provider" /> Supplier</span>
-        <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-[#858b80]" /> Other</span>
       </div>
     </div>
   )
@@ -299,6 +300,7 @@ function Marketplace({
   mode,
   setMode,
   listings,
+  nodes,
   selectedId,
   onSelect,
   accepted,
@@ -311,7 +313,12 @@ function Marketplace({
   const [sort, setSort] = useState('picks')
 
   const filtered = useMemo(() => {
-    let rows = listings.filter((l) => l.mode === mode)
+    const rowsForMode = listings.filter((listing) => listing.mode === mode)
+    const oppositeMode = listings.filter((listing) => listing.mode !== mode)
+    let rows = rowsForMode.map((listing) => {
+      const bestMatch = rankMatches(listing, oppositeMode, nodes)[0]
+      return { ...listing, match: bestMatch }
+    })
     const q = query.trim().toLowerCase()
     if (q) {
       rows = rows.filter((l) =>
@@ -323,13 +330,14 @@ function Marketplace({
     if (distance !== 'all') rows = rows.filter((l) => l.distance <= Number(distance))
 
     rows = [...rows].sort((a, b) => {
+      if (a.mine !== b.mine) return a.mine ? -1 : 1
       if (sort === 'save') return b.save - a.save
       if (sort === 'near') return a.distance - b.distance
       if (sort === 'trust') return b.reliability - a.reliability
-      return b.reliability * 10 - a.distance - (a.save > b.save ? 0 : 2)
+      return (b.match?.score || 0) - (a.match?.score || 0)
     })
     return rows
-  }, [listings, mode, query, material, distance, industry, sort])
+  }, [listings, nodes, mode, query, material, distance, industry, sort])
 
   return (
     <div className="flex h-full min-h-[420px] flex-col bg-paper">
@@ -401,7 +409,7 @@ function Marketplace({
             onChange={(e) => setSort(e.target.value)}
             className="ml-auto border border-ink/15 bg-transparent px-2 py-1.5 text-[11px] uppercase tracking-[0.12em] outline-none"
           >
-            <option value="picks">Our top picks</option>
+            <option value="picks">Best match</option>
             <option value="near">Nearest</option>
             <option value="save">Highest savings</option>
             <option value="trust">Reliability</option>
@@ -425,14 +433,36 @@ function Marketplace({
               }`}
             >
               <div>
-                <p className="text-[15px] font-semibold tracking-[-0.03em]">{item.title}</p>
+                <p className="text-[15px] font-semibold tracking-[-0.03em]">
+                  {item.title}
+                  {item.mine && (
+                    <span className="ml-2 border border-ink/20 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-muted">
+                      Your listing
+                    </span>
+                  )}
+                </p>
                 <p className="mt-0.5 text-[12px] text-muted">{item.qty} available</p>
                 <p className="mt-2 text-[13px]">{item.company}</p>
                 <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-muted">
-                  {item.distance} km · ★ {item.reliability.toFixed(1)} reliability
+                  {item.distance.toFixed(1)} km · ★ {item.reliability.toFixed(1)} reliability
                 </p>
               </div>
               <div className="flex min-w-[7.5rem] flex-col items-end justify-between">
+                {item.match && (
+                  <span
+                    title={[
+                      `Material: ${item.match.breakdown.material}%`,
+                      `Distance: ${item.match.breakdown.distance}%`,
+                      `Quantity: ${item.match.breakdown.quantity}%`,
+                      `Reliability: ${item.match.breakdown.reliability}%`,
+                      ...item.match.reasons,
+                    ].join('\n')}
+                    aria-label={`Match ${item.match.score}%. ${item.match.reasons.join('. ')}`}
+                    className="border border-ink/20 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.1em] text-muted"
+                  >
+                    Match {item.match.score}%
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -544,7 +574,7 @@ function TradeSide({ title, company, tone, offers, setOffers }) {
                   <input
                     value={offer.unit}
                     onChange={(event) => updateOffer(slot, { unit: event.target.value })}
-                    placeholder={offer.kind === 'cash' ? 'e.g. per kg' : 'e.g. kg / day'}
+                    placeholder={offer.kind === 'cash' ? 'e.g. per kg' : 'e.g. kg'}
                     className="w-full border-b border-ink/20 bg-transparent py-1 text-[10px] outline-none"
                     aria-label="Offer unit"
                   />
@@ -603,6 +633,18 @@ function TradeModal({ item, onClose, onComplete }) {
   ])
   const [acceptedBy, setAcceptedBy] = useState({ you: false, them: false })
   const [isComplete, setIsComplete] = useState(false)
+  const listedResourceOffers = userStartsWithCash ? theirOffers : yourOffers
+  const listedResourceOffer = listedResourceOffers.find(
+    (offer) => offer.kind === 'resource' && offer.label === item.title,
+  )
+  const amount = String(listedResourceOffer?.amount || '').trim()
+  const unit = String(listedResourceOffer?.unit || '').trim()
+  const amountUnit = amount.match(/\b(kg|t)\s*$/i)?.[1]?.toLowerCase()
+  const offeredQuantity = listedResourceOffer && (!unit || !amountUnit || unit.toLowerCase() === amountUnit)
+    ? `${amount}${unit && !amountUnit ? ` ${unit}` : ''}`.trim()
+    : ''
+  const tradedListing = { ...item, qty: offeredQuantity }
+  const impact = calcImpact(tradedListing)
 
   function accept(side) {
     if (isComplete) return
@@ -610,7 +652,7 @@ function TradeModal({ item, onClose, onComplete }) {
     setAcceptedBy(next)
     if (next.you && next.them) {
       setIsComplete(true)
-      onComplete()
+      onComplete(tradedListing)
     }
   }
 
@@ -628,7 +670,7 @@ function TradeModal({ item, onClose, onComplete }) {
         className="relative max-h-[94vh] w-full max-w-5xl overflow-y-auto border border-ink/50 bg-paper p-4 shadow-[0_20px_80px_rgba(20,22,20,0.2)] sm:p-6 lg:p-10"
       >
         <div className="flex items-center justify-between gap-4 font-mono text-[9px] uppercase tracking-[0.08em] sm:text-[10px]">
-          <p>Trade · Match [{Math.round(item.reliability * 19.2)}%] · [{item.distance} km]</p>
+          <p>Trade · Match [{item.match?.score ?? 0}%] · [{item.distance.toFixed(1)} km]</p>
           <button
             type="button"
             onClick={onClose}
@@ -668,7 +710,51 @@ function TradeModal({ item, onClose, onComplete }) {
         <div className="mt-5 border-t-2 border-ink pt-3 font-mono text-[9px] uppercase tracking-[0.04em] text-muted sm:mt-6 sm:text-[10px]">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span>Balance: difference [—] · Term [6 months] · Delivery [pickup by B]</span>
-            <span>[—] kg CO₂ avoided</span>
+            <span>
+              {impact === null
+                ? 'CO₂e estimate unavailable for this material'
+                : `Estimated potential CO₂e benefit from recycling: ${Math.round(impact.kgCO2Total).toLocaleString()} kg`}
+              <details className="relative ml-2 inline-block normal-case tracking-normal">
+                <summary className="cursor-pointer underline">How we calculate this</summary>
+                <div className="absolute right-0 z-20 mt-2 max-h-80 w-80 max-w-[80vw] overflow-y-auto border border-ink/20 bg-paper p-3 text-left font-sans text-[11px] normal-case tracking-normal text-ink shadow-lg">
+                  <p className="mb-2 font-semibold">Emission factors</p>
+                  <p className="mb-3 text-muted">
+                    Uses a one-off listed mass once for this trade; rate-based quantities are not estimated because the trade duration is not modeled. WARM factors are net recycling-pathway estimates. The steel benchmark assumes end-of-life scrap is recycled closed-loop into new steel for all generic steel listings; this is not confirmed per listing.
+                  </p>
+                  <ul className="space-y-2">
+                    {Object.entries(EMISSION_FACTORS).map(([key, factor]) => (
+                      <li key={key}>
+                        <span className="font-semibold">{factor.label}</span>
+                        <span className="block text-muted">
+                          Factor: {factor.factor.toFixed(6)} {factor.unit}
+                          <br />
+                          Original value: {factor.sourceValue} {factor.sourceUnit}
+                          {factor.sourceTableValue != null && ` (published table: ${factor.sourceTableValue} ${factor.sourceTableUnit})`}
+                          <br />
+                          Source: <a className="underline" href={factor.sourceUrl} target="_blank" rel="noreferrer">{factor.source}</a> · Year: {factor.year} ({factor.publicationDate})
+                          <br />
+                          {factor.modelUrl && (
+                            <>
+                              Model: <a className="underline" href={factor.modelUrl} target="_blank" rel="noreferrer">WARM Version 16 workbook</a>
+                              <br />
+                            </>
+                          )}
+                          Status: {factor.status}
+                          <br />
+                          Location: {factor.sourceLocation}
+                          <br />
+                          Boundary: {factor.boundary}
+                          <br />
+                          Assumptions: {factor.assumptions}
+                          <br />
+                          Limitations: {factor.limitations}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
+            </span>
           </div>
         </div>
 
@@ -781,12 +867,12 @@ function StreamForm({ side, onClose, onCreate }) {
           </select>
         </label>
         <label className="mt-4 block text-[11px] uppercase tracking-[0.14em] text-muted">
-          Quantity / day
+          Quantity for this trade
           <input
             className="mt-1 w-full border-b border-ink/20 bg-transparent py-2 text-sm outline-none"
             value={form.qty}
             onChange={(e) => setForm({ ...form, qty: e.target.value })}
-            placeholder="e.g. 400 kg / day"
+            placeholder="e.g. 400 kg"
           />
         </label>
         <label className="mt-4 block text-[11px] uppercase tracking-[0.14em] text-muted">
@@ -813,12 +899,25 @@ export default function App() {
   const [side, setSide] = useState('have')
   const [mode, setMode] = useState('sell')
   const [selectedId, setSelectedId] = useState('polyloop')
+  const [userLocation, setUserLocation] = useState(DEFAULT_USER_LOCATION)
   const [listings, setListings] = useState(INITIAL_LISTINGS)
   const [extraNodes, setExtraNodes] = useState([])
+  const nodes = useMemo(() => [...INITIAL_NODES, ...extraNodes], [extraNodes])
+  const listingsWithDistance = useMemo(() => {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]))
+    const location = { lat: userLocation[0], lng: userLocation[1] }
+    return listings.map((listing) => {
+      const node = nodeById.get(listing.nodeId)
+      return {
+        ...listing,
+        distance: node ? haversineKm(location, node) : Number.POSITIVE_INFINITY,
+      }
+    })
+  }, [listings, nodes, userLocation])
   const [formOpen, setFormOpen] = useState(false)
   const [accepted, setAccepted] = useState({})
   const [activeTrade, setActiveTrade] = useState(null)
-  const [stats, setStats] = useState({ streams: 12.4, saved: 8420, co2: 6240 })
+  const [stats, setStats] = useState({ streams: 12.4, saved: 8420, co2: null })
 
   useEffect(() => {
     const onScroll = () => {
@@ -844,13 +943,14 @@ export default function App() {
     setActiveTrade(item)
   }
 
-  function handleTradeComplete() {
+  function handleTradeComplete(tradedListing) {
     if (!activeTrade || accepted[activeTrade.id]) return
+    const impact = calcImpact(tradedListing)
     setAccepted((prev) => ({ ...prev, [activeTrade.id]: true }))
     setStats((s) => ({
       streams: Number((s.streams + 0.4).toFixed(1)),
       saved: s.saved + activeTrade.save,
-      co2: s.co2 + Math.round(activeTrade.save * 1.4),
+      co2: impact === null ? s.co2 : (s.co2 ?? 0) + impact.kgCO2Total,
     }))
   }
 
@@ -877,13 +977,13 @@ export default function App() {
         mode: side === 'have' ? 'buy' : 'sell',
         material: form.material,
         title: form.title,
-        qty: form.qty.includes('/') ? form.qty : `${form.qty} / day`,
+        qty: form.qty,
         company: form.company,
         nodeId: id,
-        distance: Number((3 + Math.random() * 8).toFixed(1)),
         reliability: Number((4 + Math.random() * 0.8).toFixed(1)),
         save: Math.round(180 + Math.random() * 600),
         industry: 'Materials',
+        mine: true,
       },
       ...rows,
     ])
@@ -921,11 +1021,14 @@ export default function App() {
             selectedId={selectedId}
             onSelect={setSelectedId}
             extraNodes={extraNodes}
+            userLocation={userLocation}
+            setUserLocation={setUserLocation}
           />
           <Marketplace
             mode={mode}
             setMode={setMode}
-            listings={listings}
+            listings={listingsWithDistance}
+            nodes={nodes}
             selectedId={selectedId}
             onSelect={setSelectedId}
             accepted={accepted}
@@ -937,7 +1040,7 @@ export default function App() {
           <p className="hidden sm:block">
             <span className="mr-4">● Provider (has)</span>
             <span className="mr-4">○ Need (wants)</span>
-            <span>— AI match</span>
+            <span>— Smart match</span>
           </p>
           <p className="ml-auto">The Amazon Marketplace for industrial waste.</p>
         </footer>

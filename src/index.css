@@ -70,6 +70,24 @@ body {
   background: transparent;
 }
 
+.user-map-marker {
+  border: 0;
+  background: transparent;
+}
+
+.user-map-marker span {
+  display: block;
+  border: 1px solid var(--color-ink);
+  border-radius: 9999px;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 26px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgb(20 22 20 / 35%);
+}
+
 .company-map-marker svg {
   display: block;
   height: 32px;

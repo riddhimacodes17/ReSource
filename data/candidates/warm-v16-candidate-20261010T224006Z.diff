@@ -1,0 +1,51 @@
+WARM Version 16 candidate values
+Source: https://www.epa.gov/system/files/documents/2023-12/warm_v16.xls
+Workbook SHA-256: 5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22
+Detected layout: {'sheet': 'Summary Data', 'headerRow': 1, 'materialColumn': 'A', 'recyclingColumn': 'C', 'recyclingHeader': 'Recycling of Post-Consumer Material: Default or Customized Transportation Distance'}
+All proposals remain unapproved; the approved application factor JSON is not modified.
+Verified and suitable: none; automated extraction does not approve or establish suitability.
+Extracted, awaiting review: candidate rows below.
+Unsupported: heat and water; manually sourced steel is retained unchanged.
+Invalid or incompatible: an error report is written and no candidate JSON is produced.
+
+@@ glass: extracted-awaiting-review @@
+- approved source value: -0.2760901764592596 MTCO2e/short ton
+- approved factor: 0.30433732434615207 kg CO2e potential net benefit per kg material
+- approved workbook location: Summary Data!C5
+- approved workbook SHA-256: 5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22
++ candidate source value: -0.2760901764592596 MTCO2e/short ton
++ candidate factor: 0.30433732434615207 kg CO2e potential net benefit per kg material
++ candidate workbook location: Summary Data!C5
++ candidate workbook SHA-256: 5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22
+  source location: Summary Data!C5; header C1: Recycling of Post-Consumer Material: Default or Customized Transportation Distance
+  publication date: December 2023
+  review: verify primary documentation and methodology before promotion
+
+@@ plastic: extracted-awaiting-review @@
+- approved source value: -0.9255234067519946 MTCO2e/short ton
+- approved factor: 1.0202149197879966 kg CO2e potential net benefit per kg material
+- approved workbook location: Summary Data!C35
+- approved workbook SHA-256: 5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22
++ candidate source value: -0.9255234067519946 MTCO2e/short ton
++ candidate factor: 1.0202149197879966 kg CO2e potential net benefit per kg material
++ candidate workbook location: Summary Data!C35
++ candidate workbook SHA-256: 5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22
+  source location: Summary Data!C35; header C1: Recycling of Post-Consumer Material: Default or Customized Transportation Distance
+  publication date: December 2023
+  review: verify primary documentation and methodology before promotion
+
+@@ paper: extracted-awaiting-review @@
+- approved source value: -3.5455235990647034 MTCO2e/short ton
+- approved factor: 3.908270766398367 kg CO2e potential net benefit per kg material
+- approved workbook location: Summary Data!C31
+- approved workbook SHA-256: 5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22
++ candidate source value: -3.5455235990647034 MTCO2e/short ton
++ candidate factor: 3.908270766398367 kg CO2e potential net benefit per kg material
++ candidate workbook location: Summary Data!C31
++ candidate workbook SHA-256: 5886bef6721735efdb95ffd904c1c50ff1d6f0ea567b2c8c7f8ee4633d519f22
+  source location: Summary Data!C31; header C1: Recycling of Post-Consumer Material: Default or Customized Transportation Distance
+  publication date: December 2023
+  review: verify primary documentation and methodology before promotion
+
+Steel remains the manually sourced Broadbent (2016) factor.
+Heat and water remain unsupported.
