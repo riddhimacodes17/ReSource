@@ -411,7 +411,6 @@ function Marketplace({
           >
             <option value="picks">Best match</option>
             <option value="near">Nearest</option>
-            <option value="save">Highest savings</option>
             <option value="trust">Reliability</option>
           </select>
         </div>
@@ -1042,7 +1041,7 @@ export default function App() {
             <span className="mr-4">○ Need (wants)</span>
             <span>— Smart match</span>
           </p>
-          <p className="ml-auto">The Amazon Marketplace for industrial waste.</p>
+          <p className="ml-auto">The Marketplace for industrial waste.</p>
         </footer>
       </section>
 
