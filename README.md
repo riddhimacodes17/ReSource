@@ -1,3 +1,18 @@
+
+### Trade outcome predictions
+
+The marketplace prediction API loads the fitted scikit-learn pipeline from `match_ranking_model/resource_trade_pipeline.joblib`. Use Python 3.12 with the pipeline's scikit-learn version:
+
+```sh
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-model.txt
+uvicorn backend.main:app --reload --port 8000
+```
+
+In another terminal, run `npm run dev`. Vite forwards `/api` requests to the local API. Check the API with `curl http://127.0.0.1:8000/api/health`.
+
+For a separate production frontend and API, build the frontend with `VITE_API_BASE_URL` set to the API origin and configure the API's `RESOURCE_ALLOWED_ORIGINS` environment variable with the frontend origin. For same-origin routing, leave `VITE_API_BASE_URL` empty and route `/api` to the Python service. Keep the joblib artifact on the API host; it is a trusted Python pickle and must not be exposed as a browser asset.
 # React + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

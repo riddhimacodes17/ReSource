@@ -7,11 +7,19 @@ import 'leaflet/dist/leaflet.css'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { DISTANCES, INDUSTRIES, INITIAL_LISTINGS, INITIAL_NODES, MATERIALS } from './data/seed'
 import { calcImpact, EMISSION_FACTORS } from './shared/impact'
-import { haversineKm, rankMatches } from './shared/match'
+import {
+  buildPredictionPairs,
+  comparePredictions,
+  haversineKm,
+  isMatchVisible,
+  predictionPairId,
+} from './shared/match'
 
 setWorkerUrl(workerUrl)
 
 const DEFAULT_USER_LOCATION = [12.9716, 77.5946]
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+const EMPTY_PREDICTIONS = new Map()
 
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n))
@@ -305,18 +313,56 @@ function Marketplace({
   onSelect,
   accepted,
   onAccept,
+  intent,
 }) {
   const [query, setQuery] = useState('')
   const [material, setMaterial] = useState('all')
   const [distance, setDistance] = useState('all')
   const [industry, setIndustry] = useState('All')
   const [sort, setSort] = useState('picks')
+  const [predictionState, setPredictionState] = useState({ requestKey: null, byPair: EMPTY_PREDICTIONS })
+  const predictionPairs = useMemo(
+    () => buildPredictionPairs(mode, listings, nodes),
+    [mode, listings, nodes],
+  )
+  const predictionRequestKey = JSON.stringify(predictionPairs)
+  const predictionByPair = predictionState.requestKey === predictionRequestKey
+    ? predictionState.byPair
+    : EMPTY_PREDICTIONS
+
+  useEffect(() => {
+    let active = true
+    if (!predictionPairs.length) return () => { active = false }
+
+    fetch(`${API_BASE_URL}/api/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairs: predictionPairs }),
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Trade prediction request failed')
+        return response.json()
+      })
+      .then(({ predictions }) => {
+        if (!active) return
+        setPredictionState({
+          requestKey: predictionRequestKey,
+          byPair: new Map(predictions.map((prediction) => [prediction.id, prediction])),
+        })
+      })
+      .catch(() => {})
+
+    return () => { active = false }
+  }, [predictionPairs, predictionRequestKey])
 
   const filtered = useMemo(() => {
     const rowsForMode = listings.filter((listing) => listing.mode === mode)
     const oppositeMode = listings.filter((listing) => listing.mode !== mode)
     let rows = rowsForMode.map((listing) => {
-      const bestMatch = rankMatches(listing, oppositeMode, nodes)[0]
+      const matches = oppositeMode
+        .map((opposite) => predictionByPair.get(predictionPairId(mode, listing, opposite)))
+        .filter(Boolean)
+      const bestMatch = [...matches].sort(comparePredictions)[0] || null
       return { ...listing, match: bestMatch }
     })
     const q = query.trim().toLowerCase()
@@ -330,14 +376,16 @@ function Marketplace({
     if (distance !== 'all') rows = rows.filter((l) => l.distance <= Number(distance))
 
     rows = [...rows].sort((a, b) => {
-      if (a.mine !== b.mine) return a.mine ? -1 : 1
+      if (sort !== 'picks' && a.mine !== b.mine) return a.mine ? -1 : 1
       if (sort === 'save') return b.save - a.save
       if (sort === 'near') return a.distance - b.distance
       if (sort === 'trust') return b.reliability - a.reliability
-      return (b.match?.score || 0) - (a.match?.score || 0)
+      return comparePredictions(a.match, b.match)
     })
     return rows
-  }, [listings, nodes, mode, query, material, distance, industry, sort])
+  }, [listings, mode, query, material, distance, industry, sort, predictionByPair])
+
+  const showMatch = isMatchVisible(intent, mode)
 
   return (
     <div className="flex h-full min-h-[420px] flex-col bg-paper">
@@ -447,19 +495,13 @@ function Marketplace({
                 </p>
               </div>
               <div className="flex min-w-[7.5rem] flex-col items-end justify-between">
-                {item.match && (
+                {showMatch && item.match && (
                   <span
-                    title={[
-                      `Material: ${item.match.breakdown.material}%`,
-                      `Distance: ${item.match.breakdown.distance}%`,
-                      `Quantity: ${item.match.breakdown.quantity}%`,
-                      `Reliability: ${item.match.breakdown.reliability}%`,
-                      ...item.match.reasons,
-                    ].join('\n')}
-                    aria-label={`Match ${item.match.score}%. ${item.match.reasons.join('. ')}`}
+                    title="Probability of acceptance"
+                    aria-label={`Match ${Math.round(item.match.acceptance_probability * 100)}%`}
                     className="border border-ink/20 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.1em] text-muted"
                   >
-                    Match {item.match.score}%
+                    Match {Math.round(item.match.acceptance_probability * 100)}%
                   </span>
                 )}
                 <button
@@ -618,7 +660,7 @@ function TradeSide({ title, company, tone, offers, setOffers }) {
   )
 }
 
-function TradeModal({ item, onClose, onComplete }) {
+function TradeModal({ item, onClose, onComplete, showMatch }) {
   const userStartsWithCash = item.mode === 'buy'
   const [yourOffers, setYourOffers] = useState([
     userStartsWithCash
@@ -669,7 +711,9 @@ function TradeModal({ item, onClose, onComplete }) {
         className="relative max-h-[94vh] w-full max-w-5xl overflow-y-auto border border-ink/50 bg-paper p-4 shadow-[0_20px_80px_rgba(20,22,20,0.2)] sm:p-6 lg:p-10"
       >
         <div className="flex items-center justify-between gap-4 font-mono text-[9px] uppercase tracking-[0.08em] sm:text-[10px]">
-          <p>Trade · Match [{item.match?.score ?? 0}%] · [{item.distance.toFixed(1)} km]</p>
+          <p>
+            Trade{showMatch && item.match && ` · Match ${Math.round(item.match.acceptance_probability * 100)}%`} · [{item.distance.toFixed(1)} km]
+          </p>
           <button
             type="button"
             onClick={onClose}
@@ -815,7 +859,7 @@ function TradeModal({ item, onClose, onComplete }) {
   )
 }
 
-function StreamForm({ side, onClose, onCreate }) {
+function StreamForm({ side, onClose, onCreate, onSelectSide }) {
   const [form, setForm] = useState({
     title: '',
     material: 'steel',
@@ -826,7 +870,7 @@ function StreamForm({ side, onClose, onCreate }) {
 
   function submit(e) {
     e.preventDefault()
-    if (!form.title || !form.qty || !form.company) return
+    if (!side || !form.title || !form.qty || !form.company) return
     onCreate(form)
   }
 
@@ -843,8 +887,14 @@ function StreamForm({ side, onClose, onCreate }) {
           </button>
         </div>
         <p className="mt-2 text-sm text-muted">
-          {side === 'have' ? 'You have surplus material to place.' : 'You need a material stream.'}
+          {side === 'have' ? 'You have surplus material to place.' : side === 'need' ? 'You need a material stream.' : 'Choose whether you have or need this material.'}
         </p>
+        {!side && (
+          <div className="mt-4 flex gap-2 text-[11px] font-medium uppercase tracking-[0.12em]">
+            <button type="button" onClick={() => onSelectSide('have')} className="border border-ink/40 px-3 py-2">I have it</button>
+            <button type="button" onClick={() => onSelectSide('need')} className="border border-ink/40 px-3 py-2">I need it</button>
+          </div>
+        )}
         <label className="mt-5 block text-[11px] uppercase tracking-[0.14em] text-muted">
           Material name
           <input
@@ -884,7 +934,8 @@ function StreamForm({ side, onClose, onCreate }) {
         </label>
         <button
           type="submit"
-          className="mt-6 w-full border border-ink py-2.5 text-[11px] font-medium uppercase tracking-[0.16em] hover:bg-ink hover:text-paper"
+          disabled={!side}
+          className="mt-6 w-full border border-ink py-2.5 text-[11px] font-medium uppercase tracking-[0.16em] hover:bg-ink hover:text-paper disabled:cursor-not-allowed disabled:opacity-40"
         >
           Place on the network
         </button>
@@ -895,7 +946,7 @@ function StreamForm({ side, onClose, onCreate }) {
 
 export default function App() {
   const [progress, setProgress] = useState(0)
-  const [side, setSide] = useState('have')
+  const [side, setSide] = useState(null)
   const [mode, setMode] = useState('sell')
   const [selectedId, setSelectedId] = useState('polyloop')
   const [userLocation, setUserLocation] = useState(DEFAULT_USER_LOCATION)
@@ -1026,6 +1077,7 @@ export default function App() {
           <Marketplace
             mode={mode}
             setMode={setMode}
+            intent={side}
             listings={listingsWithDistance}
             nodes={nodes}
             selectedId={selectedId}
@@ -1046,12 +1098,18 @@ export default function App() {
       </section>
 
       {formOpen && (
-        <StreamForm side={side} onClose={() => setFormOpen(false)} onCreate={handleCreate} />
+        <StreamForm
+          side={side}
+          onClose={() => setFormOpen(false)}
+          onCreate={handleCreate}
+          onSelectSide={chooseSide}
+        />
       )}
       {activeTrade && (
         <TradeModal
           key={activeTrade.id}
           item={activeTrade}
+          showMatch={isMatchVisible(side, activeTrade.mode)}
           onClose={() => setActiveTrade(null)}
           onComplete={handleTradeComplete}
         />

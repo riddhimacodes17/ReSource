@@ -1,5 +1,8 @@
 const EARTH_RADIUS_KM = 6371
-const DEFAULT_WEIGHTS = { distance: 0.35, quantity: 0.35, reliability: 0.3 }
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value))
+}
 
 export function haversineKm(a, b) {
   const toRadians = (degrees) => (degrees * Math.PI) / 180
@@ -29,98 +32,46 @@ export function parseQty(str) {
   return { value: quantity, unit: 'kg' }
 }
 
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value))
+export function predictionPairId(mode, listing, opposite) {
+  return mode === 'sell'
+    ? `${listing.id}:${opposite.id}`
+    : `${opposite.id}:${listing.id}`
 }
 
-export function scoreMatch(need, offer, weights = DEFAULT_WEIGHTS) {
-  const needMaterial = String(need.material || '').toLowerCase()
-  const offerMaterial = String(offer.material || '').toLowerCase()
-  const material = needMaterial && offerMaterial && needMaterial === offerMaterial
-    ? 1
-    : needMaterial && offerMaterial && (needMaterial === 'other' || offerMaterial === 'other')
-      ? 0.3
-      : 0
-
-  const distanceKm = Number.isFinite(offer.distance) ? offer.distance : need.distance
-  const distance = Number.isFinite(distanceKm)
-    ? clamp(1 - Math.max(0, distanceKm) / 50, 0, 1)
-    : 0
-
-  const needQty = parseQty(need.qty)
-  const offerQty = parseQty(offer.qty)
-  const quantity =
-    needQty.unit &&
-    needQty.unit === offerQty.unit &&
-    Number.isFinite(needQty.value) &&
-    Number.isFinite(offerQty.value) &&
-    Math.max(needQty.value, offerQty.value) > 0
-      ? Math.min(needQty.value, offerQty.value) / Math.max(needQty.value, offerQty.value)
-      : 0
-  const reliability = Number.isFinite(offer.reliability)
-    ? clamp(offer.reliability / 5, 0, 1)
-    : 0
-
-  const effectiveWeights = { ...DEFAULT_WEIGHTS, ...weights }
-  const weightTotal = Object.keys(DEFAULT_WEIGHTS).reduce(
-    (total, key) => total + Math.max(0, Number(effectiveWeights[key]) || 0),
-    0,
-  )
-  const weightedScore = weightTotal
-    ? (
-      distance * Math.max(0, Number(effectiveWeights.distance) || 0) +
-      quantity * Math.max(0, Number(effectiveWeights.quantity) || 0) +
-      reliability * Math.max(0, Number(effectiveWeights.reliability) || 0)
-    ) / weightTotal
-    : 0
-  const score = material === 0 ? 0 : Math.round(weightedScore * material * 100)
-  const reasons = []
-
-  if (needMaterial === offerMaterial) reasons.push('Same material')
-  else if (material > 0) reasons.push('Other material category is compatible')
-  else reasons.push('Different materials')
-
-  if (Number.isFinite(distanceKm)) reasons.push(`${distanceKm.toFixed(1)} km away`)
-  else reasons.push('Distance unavailable')
-
-  if (quantity > 0) reasons.push(`Quantity covers ${Math.round(quantity * 100)}% of need`)
-  else if (needQty.unit && offerQty.unit && needQty.unit !== offerQty.unit) {
-    reasons.push('Quantity units do not match')
-  } else {
-    reasons.push('Quantity could not be compared')
-  }
-
-  if (Number.isFinite(offer.reliability)) {
-    reasons.push(`Reliability ${clamp(offer.reliability, 0, 5).toFixed(1)}/5`)
-  } else {
-    reasons.push('Reliability unavailable')
-  }
-
-  return {
-    score,
-    breakdown: {
-      material: Math.round(material * 100),
-      distance: Math.round(distance * 100),
-      quantity: Math.round(quantity * 100),
-      reliability: Math.round(reliability * 100),
-    },
-    reasons,
-  }
-}
-
-export function rankMatches(userStream, listings, nodes) {
+export function buildPredictionPairs(mode, listings, nodes) {
+  const rowsForMode = listings.filter((listing) => listing.mode === mode)
+  const oppositeMode = listings.filter((listing) => listing.mode !== mode)
   const nodeById = new Map(nodes.map((node) => [node.id, node]))
-  const sourceLocation = nodeById.get(userStream.nodeId) || userStream
 
-  return listings
-    .map((listing) => {
-      const listingNode = nodeById.get(listing.nodeId)
-      const distance = sourceLocation.lat != null && listingNode
-        ? haversineKm(sourceLocation, listingNode)
-        : undefined
-      const match = scoreMatch({ ...userStream, distance: undefined }, { ...listing, distance })
+  return rowsForMode.flatMap((listing) => oppositeMode.map((opposite) => {
+    const buyer = mode === 'sell' ? listing : opposite
+    const seller = mode === 'sell' ? opposite : listing
+    const buyerNode = nodeById.get(buyer.nodeId)
+    const sellerNode = nodeById.get(seller.nodeId)
+    const distanceKm = buyerNode && sellerNode
+      ? haversineKm(buyerNode, sellerNode)
+      : null
 
-      return { ...listing, distance, ...match }
-    })
-    .sort((a, b) => b.score - a.score)
+    return {
+      id: predictionPairId(mode, listing, opposite),
+      buyer: { material: buyer.material, title: buyer.title, qty: buyer.qty },
+      seller: { material: seller.material, title: seller.title, qty: seller.qty },
+      distance_km: distanceKm,
+    }
+  }))
+}
+
+export function comparePredictions(a, b) {
+  if (!a) return b ? 1 : 0
+  if (!b) return -1
+  if (a.predicted_accepted !== b.predicted_accepted) {
+    return a.predicted_accepted ? -1 : 1
+  }
+  return a.predicted_accepted
+    ? b.confidence - a.confidence
+    : a.confidence - b.confidence
+}
+
+export function isMatchVisible(intent, mode) {
+  return (intent === 'have' && mode === 'sell') || (intent === 'need' && mode === 'buy')
 }
