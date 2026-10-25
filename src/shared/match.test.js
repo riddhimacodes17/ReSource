@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { comparePredictions, isMatchVisible } from './match.js'
+import { buildPredictionPairs, comparePredictions, isMatchVisible } from './match.js'
 
 test('orders accepted predictions first and rejected predictions by ascending confidence', () => {
   const predictions = [
@@ -25,4 +25,26 @@ test('shows match percentages only in the selected intent section', () => {
   assert.equal(isMatchVisible('need', 'sell'), false)
   assert.equal(isMatchVisible(null, 'buy'), false)
   assert.equal(isMatchVisible(null, 'sell'), false)
+})
+
+test('builds model predictions only against the user-placed stream', () => {
+  const listings = [
+    { id: 'market-sell', mode: 'sell', material: 'plastic', title: 'Plastic', qty: '10 kg', nodeId: 'sell-node' },
+    { id: 'user-have', mode: 'buy', material: 'plastic', title: 'Plastic', qty: '5 kg', nodeId: 'user-node' },
+    { id: 'other-buy', mode: 'buy', material: 'steel', title: 'Steel', qty: '20 kg', nodeId: 'other-node' },
+  ]
+  const nodes = [
+    { id: 'sell-node', lat: 12.97, lng: 77.59 },
+    { id: 'user-node', lat: 12.98, lng: 77.6 },
+    { id: 'other-node', lat: 12.99, lng: 77.61 },
+  ]
+
+  assert.deepEqual(
+    buildPredictionPairs('sell', listings, nodes, ['user-have']).map(({ id, buyer, seller }) => ({
+      id,
+      buyer: buyer.title,
+      seller: seller.title,
+    })),
+    [{ id: 'market-sell:user-have', buyer: 'Plastic', seller: 'Plastic' }],
+  )
 })

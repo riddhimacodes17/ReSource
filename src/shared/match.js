@@ -38,9 +38,12 @@ export function predictionPairId(mode, listing, opposite) {
     : `${opposite.id}:${listing.id}`
 }
 
-export function buildPredictionPairs(mode, listings, nodes) {
+export function buildPredictionPairs(mode, listings, nodes, oppositeListingIds) {
   const rowsForMode = listings.filter((listing) => listing.mode === mode)
-  const oppositeMode = listings.filter((listing) => listing.mode !== mode)
+  const oppositeMode = listings.filter((listing) =>
+    listing.mode !== mode &&
+    (!oppositeListingIds || oppositeListingIds.includes(listing.id)),
+  )
   const nodeById = new Map(nodes.map((node) => [node.id, node]))
 
   return rowsForMode.flatMap((listing) => oppositeMode.map((opposite) => {

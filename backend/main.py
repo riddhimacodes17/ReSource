@@ -1,15 +1,20 @@
 import json
 import os
 import re
+import sqlite3
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+from uuid import uuid4
 
 import joblib
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+from backend import database
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +52,41 @@ class TradePairInput(BaseModel):
 
 class PredictionBatch(BaseModel):
     pairs: list[TradePairInput] = Field(max_length=1000)
+
+
+class CompanyNodeInput(BaseModel):
+    id: str
+    lat: float
+    lng: float
+    type: Literal["buyer", "provider", "other"]
+    note: str
+
+
+class MarketplaceListingInput(BaseModel):
+    id: str | None = None
+    mode: Literal["buy", "sell"]
+    material: str
+    title: str
+    qty: str
+    company: str
+    reliability: float = 4.5
+    save: int = 0
+    industry: str = "Materials"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    node: CompanyNodeInput
+
+
+class MarketplaceTradeInput(BaseModel):
+    listing_id: str
+    quantity: str
+    actor_role: Literal["seller", "buyer", "hub"]
+
+
+class LotEventInput(BaseModel):
+    event_type: Literal["picked_up", "hub_inspected", "delivered", "recycled"]
+    actor_company: str = Field(min_length=1, max_length=120)
+    actor_role: Literal["seller", "buyer", "hub"]
+    weight_kg: float = Field(gt=0)
 
 
 def _clean(value: Any) -> str:
@@ -185,7 +225,13 @@ def predict_pairs(pairs: list[TradePairInput]) -> list[dict[str, Any]]:
     return results
 
 
-app = FastAPI(title="ReSource trade prediction API")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    database.initialize_database()
+    yield
+
+
+app = FastAPI(title="ReSource trade prediction API", lifespan=lifespan)
 allowed_origins = os.environ.get(
     "RESOURCE_ALLOWED_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173",
@@ -201,6 +247,94 @@ app.add_middleware(
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/api/demo/reset")
+def reset_demo() -> dict[str, Any]:
+    database.initialize_database(reset=True)
+    return {"reset": True, "stats": database.get_stats()}
+
+
+@app.get("/api/listings")
+def listings() -> dict[str, list[dict[str, Any]]]:
+    return {"listings": database.list_listings()}
+
+
+@app.post("/api/listings", status_code=201)
+def add_listing(listing: MarketplaceListingInput) -> dict[str, Any]:
+    data = listing.model_dump()
+    data["id"] = data["id"] or str(uuid4())
+    data["node"] = listing.node.model_dump()
+    try:
+        return database.create_listing(data)
+    except sqlite3.IntegrityError as error:
+        raise HTTPException(status_code=409, detail="Listing or company already exists.") from error
+
+
+@app.get("/api/companies")
+def companies() -> dict[str, list[dict[str, Any]]]:
+    return {"companies": database.list_companies()}
+
+
+@app.get("/api/stats")
+def stats() -> dict[str, int]:
+    return database.get_stats()
+
+
+@app.get("/api/lots/{lot_id}")
+def lot(lot_id: str) -> dict[str, Any]:
+    result = database.get_lot(lot_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Lot not found.")
+    result["next_event"] = database.next_lot_event(lot_id)
+    return result
+
+
+@app.post("/api/lots/{lot_id}/events", status_code=201)
+def add_lot_event(lot_id: str, event: LotEventInput) -> dict[str, Any]:
+    try:
+        result = database.record_lot_event(
+            lot_id=lot_id,
+            event_type=event.event_type,
+            actor_company=event.actor_company,
+            actor_role=event.actor_role,
+            weight_kg=event.weight_kg,
+        )
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if not result["accepted"]:
+        raise HTTPException(status_code=422, detail=result["reason"])
+    return result
+
+
+@app.get("/api/lots/{lot_id}/verify-chain")
+def verify_lot_chain(lot_id: str) -> dict[str, Any]:
+    result = database.get_lot(lot_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Lot not found.")
+    return {
+        "lot_id": lot_id,
+        "valid": result["chain_valid"],
+        "event_count": len(result["events"]),
+    }
+
+
+@app.post("/api/trades", status_code=201)
+def add_trade(trade: MarketplaceTradeInput) -> dict[str, Any]:
+    try:
+        return database.create_trade(trade.model_dump())
+    except sqlite3.IntegrityError as error:
+        raise HTTPException(status_code=404, detail="Listing not found.") from error
+
+
+@app.get("/api/trades/{trade_id}")
+def trade(trade_id: str) -> dict[str, Any]:
+    result = database.get_trade(trade_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Trade not found.")
+    return result
 
 
 @app.post("/api/predict")

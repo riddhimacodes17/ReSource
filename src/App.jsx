@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import { maplibreGL } from '@maplibre/maplibre-gl-leaflet'
 import { setWorkerUrl } from 'maplibre-gl'
+import QRCode from 'qrcode'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import 'leaflet/dist/leaflet.css'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { DISTANCES, INDUSTRIES, INITIAL_LISTINGS, INITIAL_NODES, MATERIALS } from './data/seed'
+import { DISTANCES, INDUSTRIES, MATERIALS } from './data/seed'
 import { calcImpact, EMISSION_FACTORS } from './shared/impact'
 import {
   buildPredictionPairs,
@@ -21,6 +22,51 @@ const DEFAULT_USER_LOCATION = [12.9716, 77.5946]
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 const EMPTY_PREDICTIONS = new Map()
 
+function lotIdFromPath() {
+  const match = window.location.pathname.match(/^\/lot\/([^/]+)\/?$/)
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+async function apiRequest(path, options) {
+  let response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, options)
+  } catch (error) {
+    throw new Error(
+      `Marketplace API is unreachable at ${API_BASE_URL || window.location.origin}. Start the FastAPI service with "uvicorn backend.main:app --reload --port 8000".`,
+      { cause: error },
+    )
+  }
+
+  if (response.status === 502) {
+    throw new Error(
+      `Vite cannot reach FastAPI at http://127.0.0.1:8000 for ${path}. Start the API with "uvicorn backend.main:app --reload --port 8000" and keep it running.`,
+    )
+  }
+
+  const body = await response.text()
+  let result = null
+  if (body) {
+    try {
+      result = JSON.parse(body)
+    } catch (error) {
+      throw new Error(
+        `Marketplace API returned a non-JSON response for ${path} (HTTP ${response.status}). Ensure the FastAPI service is running on port 8000.`,
+        { cause: error },
+      )
+    }
+  }
+  if (result === null) {
+    throw new Error(
+      `Marketplace API returned an empty response for ${path} (HTTP ${response.status}). Ensure the FastAPI service is running on port 8000.`,
+    )
+  }
+  if (!response.ok) {
+    throw new Error(result.detail || `Request failed (${response.status})`)
+  }
+  return result
+}
+
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n))
 }
@@ -29,15 +75,27 @@ function easeInOut(t) {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
 }
 
-function Header({ streams, saved, co2 }) {
+function Header({ stats, role, onRoleChange }) {
   return (
     <header className="relative z-30 flex items-start justify-between gap-6 px-5 pt-6 sm:px-8 lg:px-10">
       <div>
         <p className="text-[15px] font-semibold tracking-[-0.03em]">ReSource</p>
       </div>
-      <p className="max-w-[70%] text-right text-[10px] font-medium uppercase tracking-[0.18em] text-muted">
-        [{streams}] streams diverted / ₹{saved.toLocaleString()} saved / [{co2 == null ? '—' : Math.round(co2).toLocaleString()}] kg CO₂e potential recycling benefit
-      </p>
+      <div className="flex max-w-[80%] flex-wrap items-center justify-end gap-x-5 gap-y-2 text-right text-[10px] font-medium uppercase tracking-[0.14em] text-muted">
+        <p>{stats.listings} listings / {stats.companies} companies / {stats.trades} matched trades</p>
+        <label className="flex items-center gap-2">
+          Demo role
+          <select
+            aria-label="Demo role"
+            value={role}
+            onChange={(event) => onRoleChange(event.target.value)}
+            className="border border-ink/20 bg-paper px-2 py-1 text-ink"
+          >
+            <option value="seller_buyer">Seller / Buyer</option>
+            <option value="hub">Hub</option>
+          </select>
+        </label>
+      </div>
     </header>
   )
 }
@@ -188,15 +246,13 @@ function companyPinIcon(node, selected) {
   })
 }
 
-function IndustrialMap({ selectedId, onSelect, extraNodes, userLocation, setUserLocation }) {
+function IndustrialMap({ selectedId, onSelect, nodes, userLocation, setUserLocation }) {
   const mapElement = useRef(null)
   const markerLayer = useRef(null)
   const markers = useRef(new Map())
   const onSelectRef = useRef(onSelect)
   const setUserLocationRef = useRef(setUserLocation)
   const userMarker = useRef(null)
-  const nodes = useMemo(() => [...INITIAL_NODES, ...extraNodes], [extraNodes])
-
   useEffect(() => {
     onSelectRef.current = onSelect
   }, [onSelect])
@@ -311,9 +367,10 @@ function Marketplace({
   nodes,
   selectedId,
   onSelect,
-  accepted,
   onAccept,
+  onViewLot,
   intent,
+  tradeHistory,
 }) {
   const [query, setQuery] = useState('')
   const [material, setMaterial] = useState('all')
@@ -321,9 +378,17 @@ function Marketplace({
   const [industry, setIndustry] = useState('All')
   const [sort, setSort] = useState('picks')
   const [predictionState, setPredictionState] = useState({ requestKey: null, byPair: EMPTY_PREDICTIONS })
+  const ownOppositeListingIds = useMemo(
+    () => listings
+      .filter((listing) => listing.mine && listing.mode !== mode)
+      .map((listing) => listing.id),
+    [listings, mode],
+  )
   const predictionPairs = useMemo(
-    () => buildPredictionPairs(mode, listings, nodes),
-    [mode, listings, nodes],
+    () => isMatchVisible(intent, mode) && ownOppositeListingIds.length
+      ? buildPredictionPairs(mode, listings, nodes, ownOppositeListingIds)
+      : [],
+    [intent, mode, listings, nodes, ownOppositeListingIds],
   )
   const predictionRequestKey = JSON.stringify(predictionPairs)
   const predictionByPair = predictionState.requestKey === predictionRequestKey
@@ -470,7 +535,7 @@ function Marketplace({
         )}
         {filtered.map((item) => {
           const isOn = selectedId === item.nodeId
-          const isAccepted = accepted[item.id]
+          const isAccepted = item.matched
           return (
             <article
               key={item.id}
@@ -493,6 +558,19 @@ function Marketplace({
                 <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-muted">
                   {item.distance.toFixed(1)} km · ★ {item.reliability.toFixed(1)} reliability
                 </p>
+                {item.lotId && (
+                  <a
+                    href={`/lot/${encodeURIComponent(item.lotId)}`}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      onViewLot(item.lotId)
+                    }}
+                    className="mt-2 inline-block text-[10px] font-medium uppercase tracking-[0.1em] underline underline-offset-2"
+                  >
+                    View lot passport
+                  </a>
+                )}
               </div>
               <div className="flex min-w-[7.5rem] flex-col items-end justify-between">
                 {showMatch && item.match && (
@@ -523,6 +601,26 @@ function Marketplace({
             </article>
           )
         })}
+        <section className="border-t-2 border-ink px-5 py-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <h3 className="text-[15px] font-semibold tracking-[-0.03em]">Trade history</h3>
+            <span className="text-[9px] uppercase tracking-[0.1em] text-muted">This session only</span>
+          </div>
+          {tradeHistory.length === 0 ? (
+            <p className="mt-2 text-[12px] text-muted">No completed trades this session.</p>
+          ) : (
+            <ul className="mt-2 divide-y divide-ink/10">
+              {tradeHistory.map((trade) => (
+                <li key={trade.id} className="py-2">
+                  <p className="text-[12px] font-medium">{trade.title} · {trade.quantity}</p>
+                  <p className="mt-0.5 text-[10px] text-muted">
+                    {trade.company} · {trade.actorRole} · {new Date(trade.completedAt).toLocaleTimeString()}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </div>
     </div>
   )
@@ -674,6 +772,8 @@ function TradeModal({ item, onClose, onComplete, showMatch }) {
   ])
   const [acceptedBy, setAcceptedBy] = useState({ you: false, them: false })
   const [isComplete, setIsComplete] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [completionError, setCompletionError] = useState('')
   const listedResourceOffers = userStartsWithCash ? theirOffers : yourOffers
   const listedResourceOffer = listedResourceOffers.find(
     (offer) => offer.kind === 'resource' && offer.label === item.title,
@@ -687,13 +787,22 @@ function TradeModal({ item, onClose, onComplete, showMatch }) {
   const tradedListing = { ...item, qty: offeredQuantity }
   const impact = calcImpact(tradedListing)
 
-  function accept(side) {
-    if (isComplete) return
+  async function accept(side) {
+    if (isComplete || isSaving || acceptedBy[side]) return
     const next = { ...acceptedBy, [side]: true }
     setAcceptedBy(next)
     if (next.you && next.them) {
-      setIsComplete(true)
-      onComplete(tradedListing)
+      setIsSaving(true)
+      setCompletionError('')
+      try {
+        await onComplete(tradedListing)
+        setIsComplete(true)
+      } catch (error) {
+        setCompletionError(error.message)
+        setAcceptedBy((current) => ({ ...current, [side]: false }))
+      } finally {
+        setIsSaving(false)
+      }
     }
   }
 
@@ -821,7 +930,7 @@ function TradeModal({ item, onClose, onComplete, showMatch }) {
             <button
               type="button"
               onClick={() => accept('you')}
-              disabled={acceptedBy.you || isComplete}
+              disabled={acceptedBy.you || isComplete || isSaving}
               className="border-2 border-ink px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] hover:bg-ink hover:text-paper disabled:cursor-default disabled:opacity-60 sm:px-8"
             >
               <span className="mr-2 text-provider">●</span>
@@ -830,7 +939,7 @@ function TradeModal({ item, onClose, onComplete, showMatch }) {
             <button
               type="button"
               onClick={() => accept('them')}
-              disabled={acceptedBy.them || isComplete}
+              disabled={acceptedBy.them || isComplete || isSaving}
               className="border-2 border-ink px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] hover:bg-ink hover:text-paper disabled:cursor-default disabled:opacity-60 sm:px-8"
             >
               <span className="mr-2 text-buyer">○</span>
@@ -838,6 +947,12 @@ function TradeModal({ item, onClose, onComplete, showMatch }) {
             </button>
           </div>
         </div>
+
+        {completionError && (
+          <p role="alert" className="mt-3 text-center text-sm text-red-700">
+            Could not save trade: {completionError}
+          </p>
+        )}
 
         {isComplete && (
           <div
@@ -867,11 +982,17 @@ function StreamForm({ side, onClose, onCreate, onSelectSide }) {
     company: '',
     industry: 'Materials',
   })
+  const [submitError, setSubmitError] = useState('')
 
-  function submit(e) {
+  async function submit(e) {
     e.preventDefault()
     if (!side || !form.title || !form.qty || !form.company) return
-    onCreate(form)
+    setSubmitError('')
+    try {
+      await onCreate(form)
+    } catch (error) {
+      setSubmitError(error.message)
+    }
   }
 
   return (
@@ -939,20 +1060,303 @@ function StreamForm({ side, onClose, onCreate, onSelectSide }) {
         >
           Place on the network
         </button>
+        {submitError && <p role="alert" className="mt-3 text-sm text-red-700">{submitError}</p>}
       </form>
     </div>
   )
 }
 
+function LotPassport({ lotId, role, onRoleChange, tradeHistory, onBack }) {
+  const [lot, setLot] = useState(null)
+  const [loadError, setLoadError] = useState('')
+  const [eventError, setEventError] = useState('')
+  const [weight, setWeight] = useState('')
+  const [qrCode, setQrCode] = useState('')
+  const [simulating, setSimulating] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const autoStep = useRef('')
+  const activeTrade = tradeHistory.find((trade) => trade.listingId === lot?.listing.id)
+  const actorRole = role === 'hub'
+    ? 'hub'
+    : activeTrade?.actorRole || (lot?.listing.mode === 'buy' ? 'buyer' : 'seller')
+
+  useEffect(() => {
+    let active = true
+    apiRequest(`/api/lots/${encodeURIComponent(lotId)}`)
+      .then((result) => {
+        if (!active) return
+        setLot(result)
+        const latestEvent = [...result.events]
+          .reverse()
+          .find((event) => event.verification_status !== 'rejected')
+        setWeight(latestEvent ? String(latestEvent.weight_kg) : '')
+        setLoadError('')
+      })
+      .catch((error) => {
+        if (active) setLoadError(`Could not load lot passport: ${error.message}`)
+      })
+    return () => { active = false }
+  }, [lotId])
+
+  useEffect(() => {
+    let active = true
+    const url = `${window.location.origin}/lot/${encodeURIComponent(lotId)}`
+    QRCode.toDataURL(url, {
+      width: 176,
+      margin: 1,
+      color: { dark: '#141614', light: '#e8eae3' },
+    })
+      .then((dataUrl) => {
+        if (active) setQrCode(dataUrl)
+      })
+      .catch((error) => {
+        if (active) setEventError(`Could not generate the local QR code: ${error.message}`)
+      })
+    return () => { active = false }
+  }, [lotId])
+
+  useEffect(() => {
+    const nextEvent = lot?.next_event
+    if (!lot || lot.flagged || !nextEvent || nextEvent.actor_role === actorRole || submitting) return
+    const stepKey = `${lot.events.length}:${nextEvent.event_type}`
+    if (autoStep.current === stepKey) return
+    autoStep.current = stepKey
+    const timer = window.setTimeout(async () => {
+      setSimulating(true)
+      setEventError('')
+      const lastEvent = [...lot.events]
+        .reverse()
+        .find((event) => event.verification_status !== 'rejected')
+      const currentWeight = Number(lastEvent?.weight_kg || 0)
+      const simulatedWeight = nextEvent.event_type === 'picked_up'
+        ? currentWeight * 0.998
+        : nextEvent.event_type === 'recycled'
+          ? currentWeight * 0.95
+          : currentWeight
+      try {
+        await apiRequest(`/api/lots/${encodeURIComponent(lotId)}/events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event_type: nextEvent.event_type,
+            actor_role: nextEvent.actor_role,
+            actor_company: nextEvent.actor_role === 'hub'
+              ? 'Circularity Demo Hub'
+              : nextEvent.actor_role === 'seller'
+                ? lot.listing.company
+                : 'Demo Buyer / Recycler',
+            weight_kg: Number(simulatedWeight.toFixed(3)),
+          }),
+        })
+        const refreshedLot = await apiRequest(`/api/lots/${encodeURIComponent(lotId)}`)
+        setLot(refreshedLot)
+        setWeight(String(simulatedWeight.toFixed(3)))
+      } catch (error) {
+        setEventError(`Automatic demo event failed: ${error.message}`)
+      } finally {
+        setSimulating(false)
+      }
+    }, 2000)
+    return () => window.clearTimeout(timer)
+  }, [lot, actorRole, lotId, submitting])
+
+  async function recordNextEvent(event) {
+    event.preventDefault()
+    if (!lot?.next_event || submitting) return
+    setSubmitting(true)
+    setEventError('')
+    try {
+      await apiRequest(`/api/lots/${encodeURIComponent(lotId)}/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_type: lot.next_event.event_type,
+          actor_role: actorRole,
+          actor_company: actorRole === 'hub'
+            ? 'Circularity Demo Hub'
+            : actorRole === 'seller'
+              ? lot.listing.company
+              : 'Demo Buyer / Recycler',
+          weight_kg: Number(weight),
+        }),
+      })
+      const refreshedLot = await apiRequest(`/api/lots/${encodeURIComponent(lotId)}`)
+      setLot(refreshedLot)
+    } catch (error) {
+      setEventError(error.message)
+      try {
+        setLot(await apiRequest(`/api/lots/${encodeURIComponent(lotId)}`))
+      } catch (refreshError) {
+        setEventError(`${error.message} Passport refresh failed: ${refreshError.message}`)
+      }
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const nextEvent = lot?.next_event
+  const lastValidEvent = lot?.events
+    .filter((event) => event.verification_status !== 'rejected')
+    .at(-1)
+  const impactWeight = lot?.events
+    .filter((event) => event.event_type === 'recycled' && event.verification_status !== 'rejected')
+    .at(-1)?.weight_kg ?? lastValidEvent?.weight_kg
+  const impact = lot && impactWeight
+    ? calcImpact({ ...lot.listing, qty: `${impactWeight} kg` })
+    : null
+  const userCanRecord = nextEvent?.actor_role === actorRole && !lot?.flagged
+
+  return (
+    <main className="min-h-screen px-5 pb-12 sm:px-8 lg:px-10">
+      <header className="flex items-start justify-between gap-6 py-6">
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-[11px] font-medium uppercase tracking-[0.14em] underline underline-offset-4"
+        >
+          ← Marketplace
+        </button>
+        <label className="flex items-center gap-2 text-right text-[10px] font-medium uppercase tracking-[0.12em] text-muted">
+          Demo role
+          <select
+            aria-label="Demo role"
+            value={role}
+            onChange={(event) => onRoleChange(event.target.value)}
+            className="border border-ink/20 bg-paper px-2 py-1 text-ink"
+          >
+            <option value="seller_buyer">Seller / Buyer</option>
+            <option value="hub">Hub</option>
+          </select>
+          {role !== 'hub' && ` · ${actorRole || '—'}`}
+        </label>
+      </header>
+
+      <div className="mx-auto max-w-5xl">
+        {loadError && <p role="alert" className="border border-red-700/30 bg-red-50 px-3 py-2 text-sm text-red-800">{loadError}</p>}
+        {eventError && <p role="alert" className="mt-3 border border-red-700/30 bg-red-50 px-3 py-2 text-sm text-red-800">{eventError}</p>}
+        {!lot && !loadError && <p className="py-10 text-sm text-muted">Loading lot passport…</p>}
+        {lot && (
+          <>
+            <div className="grid gap-8 border-y-2 border-ink py-6 md:grid-cols-[1fr_auto] md:items-center">
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted">Public lot passport</p>
+                <h1 className="mt-2 break-all text-3xl font-semibold tracking-[-0.05em] sm:text-5xl">{lot.id}</h1>
+                <p className="mt-3 text-[14px]">{lot.listing.title} · {lot.listing.company}</p>
+                <div className="mt-4 flex flex-wrap gap-2 text-[10px] font-medium uppercase tracking-[0.12em]">
+                  <span className="border border-ink/25 px-2 py-1">Status · {lot.status.replaceAll('_', ' ')}</span>
+                  <span className="border border-ink/25 px-2 py-1">Listed · {lot.listing.qty}</span>
+                  {lastValidEvent && (
+                    <span className="border border-ink/25 px-2 py-1">Current · {Number(lastValidEvent.weight_kg).toLocaleString()} kg</span>
+                  )}
+                  <span className={`border px-2 py-1 ${lot.chain_valid ? 'border-provider/50 text-provider' : 'border-red-700/50 text-red-800'}`}>
+                    Hash chain · {lot.chain_valid ? 'verified' : 'alteration detected'}
+                  </span>
+                </div>
+                {lot.flagged && (
+                  <p className="mt-3 text-sm text-red-800">Lot flagged: {lot.flagged_reason}</p>
+                )}
+                {impact && (
+                  <p className="mt-4 text-[12px] text-muted">
+                    Provisional potential CO₂e benefit · {Math.round(impact.kgCO2Total).toLocaleString()} kg
+                  </p>
+                )}
+                {!impact && (
+                  <p className="mt-4 text-[12px] text-muted">CO₂e estimate unavailable for this material or weight.</p>
+                )}
+              </div>
+              <div className="flex items-center gap-4 md:flex-col">
+                {qrCode ? (
+                  <img src={qrCode} alt={`QR code linking to lot ${lot.id}`} className="h-28 w-28 border border-ink/15 p-1" />
+                ) : (
+                  <div className="flex h-28 w-28 items-center justify-center border border-ink/15 text-[9px] uppercase text-muted">Creating QR…</div>
+                )}
+                <span className="max-w-36 break-all text-[9px] uppercase tracking-[0.08em] text-muted">Local QR · {window.location.origin}/lot/{lot.id}</span>
+              </div>
+            </div>
+
+            <section className="grid gap-8 py-7 lg:grid-cols-[minmax(0,1fr)_18rem]">
+              <div>
+                <div className="flex items-baseline justify-between gap-4">
+                  <h2 className="text-[20px] font-semibold tracking-[-0.04em]">Custody timeline</h2>
+                  <span className="text-[9px] uppercase tracking-[0.12em] text-muted">Hash-linked local ledger</span>
+                </div>
+                <ol className="mt-5 border-l border-ink/20">
+                  {lot.events.map((event) => (
+                    <li key={event.id} className="relative border-b border-ink/10 py-4 pl-5">
+                      <span className="absolute -left-[5px] top-5 h-2 w-2 rounded-full bg-provider" />
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="text-[13px] font-semibold uppercase tracking-[0.04em]">{event.event_type.replaceAll('_', ' ')}</p>
+                          <p className="mt-1 text-[12px]">{event.actor_company} · {event.actor_role}</p>
+                        </div>
+                        <span className="border border-ink/20 px-2 py-1 text-[9px] uppercase tracking-[0.1em]">{event.verification_status}</span>
+                      </div>
+                      <p className="mt-2 text-[11px] text-muted">
+                        {Number(event.weight_kg).toLocaleString()} kg · {new Date(event.timestamp).toLocaleString()}
+                      </p>
+                      <p className="mt-2 break-all font-mono text-[9px] text-muted">
+                        SHA-256 {event.event_hash.slice(0, 16)}… · {event.tx_ref}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+
+              <aside className="h-fit border border-ink/20 p-4">
+                <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted">Next custody step</p>
+                {lot.flagged ? (
+                  <p className="mt-3 text-[13px] text-red-800">Recording is paused because this lot is flagged.</p>
+                ) : userCanRecord ? (
+                  <form onSubmit={recordNextEvent} className="mt-3">
+                    <p className="text-[13px] font-medium">{nextEvent.event_type.replaceAll('_', ' ')}</p>
+                    <label className="mt-4 block text-[10px] uppercase tracking-[0.12em] text-muted">
+                      Weight in kg
+                      <input
+                        type="number"
+                        min="0.001"
+                        step="0.001"
+                        required
+                        value={weight}
+                        onChange={(event) => setWeight(event.target.value)}
+                        className="mt-1 w-full border-b border-ink/25 bg-transparent py-2 text-sm text-ink outline-none focus:border-ink"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      disabled={submitting || !Number(weight)}
+                      className="mt-4 w-full border border-ink py-2 text-[10px] font-medium uppercase tracking-[0.14em] hover:bg-ink hover:text-paper disabled:opacity-40"
+                    >
+                      {submitting ? 'Recording…' : 'Record event'}
+                    </button>
+                  </form>
+                ) : nextEvent ? (
+                  <p className="mt-3 text-[13px] text-muted">
+                    {simulating
+                      ? `Demo ${nextEvent.actor_role} step in progress…`
+                      : `Waiting for the ${nextEvent.actor_role} step…`}
+                    <span className="mt-2 block text-[10px]">Other roles are simulated after a 2-second pause.</span>
+                  </p>
+                ) : (
+                  <p className="mt-3 text-[13px] text-muted">All demo custody steps are recorded.</p>
+                )}
+              </aside>
+            </section>
+          </>
+        )}
+      </div>
+    </main>
+  )
+}
+
 export default function App() {
+  const [routeLotId, setRouteLotId] = useState(lotIdFromPath)
   const [progress, setProgress] = useState(0)
   const [side, setSide] = useState(null)
   const [mode, setMode] = useState('sell')
   const [selectedId, setSelectedId] = useState('polyloop')
   const [userLocation, setUserLocation] = useState(DEFAULT_USER_LOCATION)
-  const [listings, setListings] = useState(INITIAL_LISTINGS)
-  const [extraNodes, setExtraNodes] = useState([])
-  const nodes = useMemo(() => [...INITIAL_NODES, ...extraNodes], [extraNodes])
+  const [listings, setListings] = useState([])
+  const [nodes, setNodes] = useState([])
   const listingsWithDistance = useMemo(() => {
     const nodeById = new Map(nodes.map((node) => [node.id, node]))
     const location = { lat: userLocation[0], lng: userLocation[1] }
@@ -965,9 +1369,48 @@ export default function App() {
     })
   }, [listings, nodes, userLocation])
   const [formOpen, setFormOpen] = useState(false)
-  const [accepted, setAccepted] = useState({})
   const [activeTrade, setActiveTrade] = useState(null)
-  const [stats, setStats] = useState({ streams: 12.4, saved: 8420, co2: null })
+  const [stats, setStats] = useState({ listings: 0, companies: 0, trades: 0 })
+  const [demoRole, setDemoRole] = useState('seller_buyer')
+  const [tradeHistory, setTradeHistory] = useState([])
+  const [requestError, setRequestError] = useState('')
+
+  useEffect(() => {
+    function handlePopState() {
+      setRouteLotId(lotIdFromPath())
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const reset = lotIdFromPath()
+      ? Promise.resolve()
+      : apiRequest('/api/demo/reset', { method: 'POST' })
+    reset
+      .then(() => Promise.all([
+        apiRequest('/api/listings'),
+        apiRequest('/api/companies'),
+        apiRequest('/api/stats'),
+      ]))
+      .then(([listingResult, companyResult, currentStats]) => {
+        if (!active) return
+        setListings(listingResult.listings)
+        setNodes(companyResult.companies)
+        setStats(currentStats)
+        setTradeHistory([])
+        setRequestError('')
+      })
+      .catch((error) => {
+        if (active) {
+          setRequestError(
+            `Could not load marketplace data: ${error.message} Existing listings are stored in SQLite and load when the API is available.`,
+          )
+        }
+      })
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     const onScroll = () => {
@@ -989,62 +1432,104 @@ export default function App() {
   }
 
   function handleAccept(item) {
-    if (accepted[item.id]) return
+    if (item.matched) return
     setActiveTrade(item)
   }
 
-  function handleTradeComplete(tradedListing) {
-    if (!activeTrade || accepted[activeTrade.id]) return
-    const impact = calcImpact(tradedListing)
-    setAccepted((prev) => ({ ...prev, [activeTrade.id]: true }))
-    setStats((s) => ({
-      streams: Number((s.streams + 0.4).toFixed(1)),
-      saved: s.saved + activeTrade.save,
-      co2: impact === null ? s.co2 : (s.co2 ?? 0) + impact.kgCO2Total,
-    }))
+  async function handleTradeComplete(tradedListing) {
+    if (!activeTrade) return
+    setListings((current) => current.map((listing) => (
+      listing.id === activeTrade.id ? { ...listing, matched: true } : listing
+    )))
+    setTradeHistory((current) => [
+      {
+        id: crypto.randomUUID(),
+        title: activeTrade.title,
+        company: activeTrade.company,
+        listingId: activeTrade.id,
+        lotId: activeTrade.lotId,
+        quantity: tradedListing.qty,
+        actorRole: demoRole === 'hub'
+          ? 'hub'
+          : activeTrade.mode === 'buy' ? 'buyer' : 'seller',
+        completedAt: new Date().toISOString(),
+      },
+      ...current,
+    ])
+    setStats((current) => ({ ...current, trades: current.trades + 1 }))
   }
 
-  function handleCreate(form) {
-    const id = `n-${Date.now()}`
-    const listingId = `l-${Date.now()}`
-    const lat = 12.93 + Math.random() * 0.07
-    const lng = 77.54 + Math.random() * 0.1
-    setExtraNodes((nodes) => [
-      ...nodes,
-      {
-        id,
-        lat,
-        lng,
-        type: side === 'have' ? 'provider' : 'buyer',
-        name: form.company,
-        material: form.material,
-        note: `${side === 'have' ? 'Offers' : 'Needs'} ${form.title.toLowerCase()}`,
-      },
-    ])
-    setListings((rows) => [
-      {
-        id: listingId,
+  async function handleCreate(form) {
+    const id = crypto.randomUUID()
+    const node = {
+      id,
+      lat: 12.93 + Math.random() * 0.07,
+      lng: 77.54 + Math.random() * 0.1,
+      type: side === 'have' ? 'provider' : 'buyer',
+      note: `${side === 'have' ? 'Offers' : 'Needs'} ${form.title.toLowerCase()}`,
+    }
+    const listing = await apiRequest('/api/listings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         mode: side === 'have' ? 'buy' : 'sell',
         material: form.material,
         title: form.title,
         qty: form.qty,
         company: form.company,
-        nodeId: id,
         reliability: Number((4 + Math.random() * 0.8).toFixed(1)),
         save: Math.round(180 + Math.random() * 600),
         industry: 'Materials',
-        mine: true,
-      },
-      ...rows,
+        node,
+      }),
+    })
+    setListings((rows) => [{ ...listing, mine: true }, ...rows])
+    setNodes((companies) => [
+      ...companies,
+      { ...node, name: form.company, material: form.material },
     ])
     setSelectedId(id)
     setFormOpen(false)
+    try {
+      setStats(await apiRequest('/api/stats'))
+      setRequestError('')
+    } catch (error) {
+      setRequestError(`Listing was saved, but counts could not be refreshed: ${error.message}`)
+    }
+  }
+
+  function navigateToLot(lotId) {
+    const path = `/lot/${encodeURIComponent(lotId)}`
+    window.history.pushState({}, '', path)
+    setRouteLotId(lotId)
+    window.scrollTo(0, 0)
+  }
+
+  function navigateHome() {
+    window.history.pushState({}, '', '/')
+    setRouteLotId(null)
+    window.scrollTo(0, 0)
   }
 
   return (
     <div className="paper-grain bg-paper text-ink">
+      {routeLotId ? (
+        <LotPassport
+          lotId={routeLotId}
+          role={demoRole}
+          onRoleChange={setDemoRole}
+          tradeHistory={tradeHistory}
+          onBack={navigateHome}
+        />
+      ) : (
+        <>
       <section className="relative z-10 flex min-h-screen flex-col overflow-hidden">
-        <Header streams={stats.streams} saved={stats.saved} co2={stats.co2} />
+        <Header stats={stats} role={demoRole} onRoleChange={setDemoRole} />
+        {requestError && (
+          <p role="alert" className="mx-5 mt-2 border border-red-700/30 bg-red-50 px-3 py-2 text-sm text-red-800 sm:mx-8 lg:mx-10">
+            {requestError}
+          </p>
+        )}
 
         <div className="relative flex-1">
           <div className="pointer-events-none absolute inset-0">
@@ -1070,7 +1555,7 @@ export default function App() {
           <IndustrialMap
             selectedId={selectedId}
             onSelect={setSelectedId}
-            extraNodes={extraNodes}
+            nodes={nodes}
             userLocation={userLocation}
             setUserLocation={setUserLocation}
           />
@@ -1082,8 +1567,9 @@ export default function App() {
             nodes={nodes}
             selectedId={selectedId}
             onSelect={setSelectedId}
-            accepted={accepted}
             onAccept={handleAccept}
+            onViewLot={navigateToLot}
+            tradeHistory={tradeHistory}
           />
         </div>
 
@@ -1113,6 +1599,8 @@ export default function App() {
           onClose={() => setActiveTrade(null)}
           onComplete={handleTradeComplete}
         />
+      )}
+        </>
       )}
     </div>
   )
